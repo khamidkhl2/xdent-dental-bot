@@ -6,13 +6,15 @@ Automates patient intake (Full Name, Birth Year, District/Address, Phone)
 and dispatches structured leads to clinic administrators in real time.
 """
 
+from __future__ import annotations
+
 import asyncio
 import html
 import logging
 import os
 import sys
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Union
 
 from dotenv import load_dotenv
 
@@ -45,8 +47,8 @@ except ImportError:
 load_dotenv()
 
 # Placeholders or environment variables
-BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "YOUR_ADMIN_CHAT_ID_HERE")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "").strip()
 
 CLINIC_NAME = "Dr. Shoxruz XDENT Dental Clinic"
 CLINIC_ADDRESS = "г. Ташкент, пр-т Мирзо Улугбека"
@@ -287,13 +289,17 @@ def get_contact_reply_keyboard() -> ReplyKeyboardMarkup:
 # ---------------------------------------------------------------------------
 # Bot & Dispatcher Setup
 # ---------------------------------------------------------------------------
-if HAS_DEFAULT_PROPERTIES:
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
+bot: Optional[Bot] = None
+if BOT_TOKEN and ":" in BOT_TOKEN and not BOT_TOKEN.startswith("YOUR_"):
+    if HAS_DEFAULT_PROPERTIES:
+        bot = Bot(
+            token=BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+        )
+    else:
+        bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 else:
-    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+    logger.warning("BOT_TOKEN is not set or invalid! Please configure BOT_TOKEN.")
 
 dp = Dispatcher(storage=MemoryStorage())
 
@@ -401,7 +407,7 @@ async def cb_location_menu(callback: CallbackQuery) -> None:
 @dp.message(Command("cancel"))
 @dp.message(F.text.casefold() == "отмена")
 @dp.message(F.text.casefold() == "❌ отменить запись")
-async def cancel_booking(event: Message | CallbackQuery, state: FSMContext) -> None:
+async def cancel_booking(event: Union[Message, CallbackQuery], state: FSMContext) -> None:
     """Cancel booking flow at any step."""
     current_state = await state.get_state()
     await state.clear()
