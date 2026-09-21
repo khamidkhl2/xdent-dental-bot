@@ -165,6 +165,21 @@ DOCTORS_TEXT = (
     "• Специализация: лечение кариеса без бормашины (Icon), адаптация деток."
 )
 
+ABOUT_CLINIC_TEXT = (
+    f"💎 <b>О стоматологической клинике {CLINIC_NAME}</b>\n\n"
+    "<b>Dr. Shoxruz XDENT</b> — флагманский центр эстетической, ортодонтической "
+    "и хирургической стоматологии в Ташкенте.\n\n"
+    "✨ <b>Наши стандарты качества:</b>\n"
+    "• <b>Европейское оборудование:</b> дентальные микроскопы Carl Zeiss, 3D-томографы, немецкие установки KaVo.\n"
+    "• <b>Абсолютная стерильность:</b> 5-ступенчатая стерилизация инструментов (автоклавы B-класса Euronda, Италия).\n"
+    "• <b>Лечение без боли:</b> ультратонкие японские иглы и премиальные анестетики последнего поколения.\n"
+    "• <b>24/7 Скорая помощь:</b> круглосуточный прием пациентов с острой зубной болью и травмами.\n"
+    "• <b>Официальная гарантия:</b> гарантийные сертификаты на все виды имплантов и коронок.\n\n"
+    f"📍 <b>Адрес:</b> {CLINIC_ADDRESS}\n"
+    f"🕒 <b>Режим работы:</b> {CLINIC_SCHEDULE}\n"
+    f"📞 <b>Единый колл-центр:</b> <code>{CLINIC_PHONE}</code>"
+)
+
 # ---------------------------------------------------------------------------
 # FSM States
 # ---------------------------------------------------------------------------
@@ -345,8 +360,166 @@ def get_cancel_inline_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def get_bottom_reply_keyboard(is_admin_user: bool = False) -> ReplyKeyboardMarkup:
+    """Persistent bottom keyboard docked below the text input."""
+    kb = [
+        [
+            KeyboardButton(text="🦷 Услуги и цены"),
+            KeyboardButton(text="👨‍⚕️ Наши врачи"),
+        ],
+        [
+            KeyboardButton(text="📝 Записаться на прием"),
+        ],
+        [
+            KeyboardButton(text="📍 Локация и контакты"),
+            KeyboardButton(text="ℹ️ О клинике"),
+        ],
+    ]
+    if is_admin_user:
+        kb.append([KeyboardButton(text="👨‍💼 Панель администратора")])
+    return ReplyKeyboardMarkup(
+        keyboard=kb,
+        resize_keyboard=True,
+        is_persistent=True,
+    )
+
+
+def get_services_choice_keyboard() -> InlineKeyboardMarkup:
+    """Inline buttons to quickly choose a service on Step 1."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔍 Консультация + снимок (150 тыс)",
+                    callback_data="pick_svc_consultation",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✨ Проф. чистка / AirFlow",
+                    callback_data="pick_svc_therapy",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🦷 Острая боль / Лечение кариеса",
+                    callback_data="pick_svc_pain",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⚙️ Имплантация зубов под ключ",
+                    callback_data="pick_svc_surgery",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📐 Исправление прикуса (Брекеты / Элайнеры)",
+                    callback_data="pick_svc_orthodontics",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🧸 Детская стоматология",
+                    callback_data="pick_svc_pediatric",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✍️ Другая проблема (ввести текстом)",
+                    callback_data="pick_svc_custom",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить запись", callback_data="booking_cancel"
+                )
+            ],
+        ]
+    )
+
+
+def get_name_choice_keyboard(first_name: Optional[str] = None) -> InlineKeyboardMarkup:
+    """Inline buttons for name step."""
+    buttons = []
+    if first_name and first_name != "Гость":
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"👤 Использовать: {first_name}",
+                callback_data=f"pick_name_{first_name[:30]}",
+            )
+        ])
+    buttons.append([
+        InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_year_choice_keyboard() -> InlineKeyboardMarkup:
+    """Inline buttons for quick birth year selection on Step 3."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="1985", callback_data="pick_year_1985"),
+                InlineKeyboardButton(text="1990", callback_data="pick_year_1990"),
+                InlineKeyboardButton(text="1995", callback_data="pick_year_1995"),
+            ],
+            [
+                InlineKeyboardButton(text="1998", callback_data="pick_year_1998"),
+                InlineKeyboardButton(text="2000", callback_data="pick_year_2000"),
+                InlineKeyboardButton(text="2002", callback_data="pick_year_2002"),
+            ],
+            [
+                InlineKeyboardButton(text="2005", callback_data="pick_year_2005"),
+                InlineKeyboardButton(text="👶 Ребенок (до 14 лет)", callback_data="pick_year_2015"),
+            ],
+            [
+                InlineKeyboardButton(text="✍️ Ввести свой год", callback_data="pick_year_custom"),
+            ],
+            [
+                InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel"),
+            ],
+        ]
+    )
+
+
+def get_districts_keyboard() -> InlineKeyboardMarkup:
+    """Inline buttons for Tashkent districts on Step 4."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="Мирзо-Улугбекский", callback_data="pick_dist_Мирзо-Улугбекский"),
+                InlineKeyboardButton(text="Юнусабадский", callback_data="pick_dist_Юнусабадский"),
+            ],
+            [
+                InlineKeyboardButton(text="Чиланзарский", callback_data="pick_dist_Чиланзарский"),
+                InlineKeyboardButton(text="Яшнабадский", callback_data="pick_dist_Яшнабадский"),
+            ],
+            [
+                InlineKeyboardButton(text="Мирабадский", callback_data="pick_dist_Мирабадский"),
+                InlineKeyboardButton(text="Яккасарайский", callback_data="pick_dist_Яккасарайский"),
+            ],
+            [
+                InlineKeyboardButton(text="Шайхантахурский", callback_data="pick_dist_Шайхантахурский"),
+                InlineKeyboardButton(text="Алмазарский", callback_data="pick_dist_Алмазарский"),
+            ],
+            [
+                InlineKeyboardButton(text="Сергелийский", callback_data="pick_dist_Сергелийский"),
+                InlineKeyboardButton(text="Учтепинский", callback_data="pick_dist_Учтепинский"),
+            ],
+            [
+                InlineKeyboardButton(text="Янгихаётский", callback_data="pick_dist_Янгихаётский"),
+                InlineKeyboardButton(text="Другой регион / область", callback_data="pick_dist_Другой регион"),
+            ],
+            [
+                InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel"),
+            ],
+        ]
+    )
+
+
 def get_contact_reply_keyboard() -> ReplyKeyboardMarkup:
-    """Reply keyboard requesting user contact."""
+    """Reply keyboard requesting user contact with one-tap button."""
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📱 Поделиться контактом", request_contact=True)],
@@ -393,9 +566,16 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             f"Вы авторизованы как <b>Управляющий / Администратор</b> (ID: <code>{user_id}</code>).\n\n"
             f"✅ Уведомления о новых пациентах: <b>АКТИВНЫ</b>\n"
             f"Все новые записи пациентов автоматически поступают в этот чат с деталями, контактами и адресом.\n\n"
-            f"Выберите действие в панели администратора:"
+            f"Используйте кнопки меню внизу экрана или в сообщении:"
         )
-        await message.answer(greeting, reply_markup=get_admin_panel_keyboard())
+        await message.answer(
+            greeting,
+            reply_markup=get_bottom_reply_keyboard(is_admin_user=True),
+        )
+        await message.answer(
+            "Быстрые действия панели администратора:",
+            reply_markup=get_admin_panel_keyboard(),
+        )
         return
 
     # Normal patient / client flow
@@ -405,12 +585,87 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         f"Добро пожаловать в цифровую приемную клиники <b>{CLINIC_NAME}</b> 🦷\n\n"
         f"Мы предоставляем полный спектр премиальной стоматологической помощи "
         f"в Ташкенте с использованием передового европейского оборудования.\n\n"
-        f"Выберите интересующий вас раздел в меню ниже:"
+        f"Выберите интересующий вас раздел в меню ниже или воспользуйтесь кнопками прямо под клавиатурой 👇"
     )
     await message.answer(
         greeting,
+        reply_markup=get_bottom_reply_keyboard(is_admin_user=False),
+    )
+    await message.answer(
+        "Навигация по разделам клиники:",
         reply_markup=get_main_menu_keyboard(is_admin_user=False),
     )
+
+
+# ---------------------------------------------------------------------------
+# Bottom Reply Keyboard Handlers
+# ---------------------------------------------------------------------------
+@dp.message(F.text == "🦷 Услуги и цены")
+async def msg_services(message: Message, state: FSMContext) -> None:
+    """Handle bottom keyboard 'Услуги и цены'."""
+    await state.clear()
+    text = (
+        "🦷 <b>Услуги и цены клиники Dr. Shoxruz XDENT</b>\n\n"
+        "Мы придерживаемся политики открытых и честных цен без скрытых доплат. "
+        "Выберите направление стоматологии для получения подробной информации:"
+    )
+    await message.answer(text, reply_markup=get_services_keyboard())
+
+
+@dp.message(F.text.in_({"👨‍⚕️ Наши врачи", "👨‍⚕️ Врачи"}))
+async def msg_doctors(message: Message, state: FSMContext) -> None:
+    """Handle bottom keyboard 'Наши врачи'."""
+    await state.clear()
+    await message.answer(DOCTORS_TEXT, reply_markup=get_doctors_keyboard())
+
+
+@dp.message(F.text == "📝 Записаться на прием")
+async def msg_book(message: Message, state: FSMContext) -> None:
+    """Handle bottom keyboard 'Записаться на прием'."""
+    await state.set_state(BookingState.service)
+    text = (
+        "📝 <b>Запись на прием в Dr. Shoxruz XDENT</b>\n\n"
+        "<b>Шаг 1 из 5:</b> Выберите услугу или проблему из списка ниже "
+        "или опишите вашу ситуацию своими словами:"
+    )
+    await message.answer(text, reply_markup=get_services_choice_keyboard())
+
+
+@dp.message(F.text == "📍 Локация и контакты")
+async def msg_location(message: Message, state: FSMContext) -> None:
+    """Handle bottom keyboard 'Локация и контакты'."""
+    await state.clear()
+    location_text = (
+        f"📍 <b>Локация и контакты — {CLINIC_NAME}</b>\n\n"
+        f"🏢 <b>Адрес:</b> {CLINIC_ADDRESS}\n"
+        f"🕒 <b>Режим работы:</b> {CLINIC_SCHEDULE}\n"
+        f"📞 <b>Единый телефон:</b> <code>{CLINIC_PHONE}</code>\n\n"
+        f"<i>Ниже мы отправили геолокацию на карте, чтобы вам было удобно построить маршрут.</i>"
+    )
+    await message.answer(location_text, reply_markup=get_location_keyboard())
+    try:
+        await message.answer_location(
+            latitude=CLINIC_LATITUDE,
+            longitude=CLINIC_LONGITUDE,
+        )
+    except Exception as exc:
+        logger.warning("Could not send location coordinates: %s", exc)
+
+
+@dp.message(F.text == "ℹ️ О клинике")
+async def msg_about(message: Message, state: FSMContext) -> None:
+    """Handle bottom keyboard 'О клинике'."""
+    await state.clear()
+    await message.answer(
+        ABOUT_CLINIC_TEXT,
+        reply_markup=get_main_menu_keyboard(is_admin_user=is_manager(message.from_user.id)),
+    )
+
+
+@dp.message(F.text == "👨‍💼 Панель администратора")
+async def msg_admin_panel(message: Message, state: FSMContext) -> None:
+    """Handle bottom keyboard 'Панель администратора'."""
+    await cmd_admin(message, state)
 
 
 @dp.message(Command("admin"))
@@ -738,38 +993,37 @@ async def cb_location_menu(callback: CallbackQuery) -> None:
 # ---------------------------------------------------------------------------
 # FSM Lead Intake Flow (Booking)
 # ---------------------------------------------------------------------------
+SERVICE_PICK_MAP = {
+    "consultation": "Первичная консультация и диагностика",
+    "therapy": "Терапия и чистка (Проф. гигиена)",
+    "pain": "Острая зубная боль / Лечение кариеса",
+    "surgery": "Хирургия и имплантация зубов",
+    "orthodontics": "Ортодонтия (Брекеты / Элайнеры)",
+    "pediatric": "Детская стоматология",
+}
+
+
 @dp.callback_query(F.data == "booking_cancel")
 @dp.message(Command("cancel"))
 @dp.message(F.text.casefold() == "отмена")
 @dp.message(F.text.casefold() == "❌ отменить запись")
 async def cancel_booking(event: Union[Message, CallbackQuery], state: FSMContext) -> None:
     """Cancel booking flow at any step."""
-    current_state = await state.get_state()
     await state.clear()
+    user_id = event.from_user.id
 
     cancel_msg = (
         "❌ <b>Запись на прием отменена.</b>\n\n"
-        "Вы всегда можете вернуться в главное меню и начать заново, "
-        "когда вам будет удобно."
+        "Вы всегда можете вернуться к записи или выбрать интересующий раздел "
+        "в меню внизу экрана 👇"
     )
 
+    reply_kb = get_bottom_reply_keyboard(is_admin_user=is_manager(user_id))
     if isinstance(event, CallbackQuery):
-        await event.message.answer(
-            cancel_msg,
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        await event.message.answer(
-            "Главное меню:", reply_markup=get_main_menu_keyboard()
-        )
+        await event.message.answer(cancel_msg, reply_markup=reply_kb)
         await event.answer()
     else:
-        await event.answer(
-            cancel_msg,
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        await event.answer(
-            "Главное меню:", reply_markup=get_main_menu_keyboard()
-        )
+        await event.answer(cancel_msg, reply_markup=reply_kb)
 
 
 @dp.callback_query(F.data == "book_start")
@@ -778,10 +1032,37 @@ async def start_booking_generic(callback: CallbackQuery, state: FSMContext) -> N
     await state.set_state(BookingState.service)
     text = (
         "📝 <b>Запись на прием в Dr. Shoxruz XDENT</b>\n\n"
-        "<b>Шаг 1 из 5:</b> Какая услуга или проблема вас беспокоит?\n"
-        "<i>(Например: острая зубная боль, чистка зубов, консультация по брекетам, имплантация)</i>"
+        "<b>Шаг 1 из 5:</b> Выберите услугу или проблему из списка ниже "
+        "(или опишите вашу ситуацию своими словами):"
     )
-    await callback.message.answer(text, reply_markup=get_cancel_inline_keyboard())
+    await callback.message.answer(text, reply_markup=get_services_choice_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(BookingState.service, F.data.startswith("pick_svc_"))
+async def cb_pick_service(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle 1-tap service selection on Step 1."""
+    svc_key = callback.data.replace("pick_svc_", "")
+    if svc_key == "custom":
+        await callback.message.answer(
+            "Пожалуйста, напишите кратко текстом вашу проблему или желаемую услугу:",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    svc_title = SERVICE_PICK_MAP.get(svc_key, svc_key)
+    await state.update_data(service=svc_title)
+    await state.set_state(BookingState.full_name)
+
+    first_name = callback.from_user.first_name
+    text = (
+        f"📝 <b>Выбрано:</b> <i>{html.escape(svc_title)}</i>\n\n"
+        "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
+        "Вы можете нажать кнопку ниже, чтобы использовать имя вашего профиля, "
+        "или ввести ФИО вручную:"
+    )
+    await callback.message.answer(text, reply_markup=get_name_choice_keyboard(first_name))
     await callback.answer()
 
 
@@ -794,12 +1075,14 @@ async def start_booking_with_service(callback: CallbackQuery, state: FSMContext)
     await state.update_data(service=svc_title)
     await state.set_state(BookingState.full_name)
 
+    first_name = callback.from_user.first_name
     text = (
         f"📝 <b>Запись на прием:</b> <i>{html.escape(svc_title)}</i>\n\n"
         "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
-        "Это необходимо для предварительной регистрации в базе пациентов."
+        "Вы можете нажать кнопку ниже, чтобы использовать имя вашего профиля, "
+        "или ввести ФИО вручную:"
     )
-    await callback.message.answer(text, reply_markup=get_cancel_inline_keyboard())
+    await callback.message.answer(text, reply_markup=get_name_choice_keyboard(first_name))
     await callback.answer()
 
 
@@ -809,19 +1092,38 @@ async def process_service(message: Message, state: FSMContext) -> None:
     service_text = message.text.strip() if message.text else ""
     if len(service_text) < 2:
         await message.answer(
-            "Пожалуйста, кратко опишите проблему или желаемую услугу:",
-            reply_markup=get_cancel_inline_keyboard(),
+            "Пожалуйста, выберите услугу кнопкой или опишите проблему текстом:",
+            reply_markup=get_services_choice_keyboard(),
         )
         return
 
     await state.update_data(service=service_text)
     await state.set_state(BookingState.full_name)
 
+    first_name = message.from_user.first_name
     text = (
+        f"📝 <b>Выбрано:</b> <i>{html.escape(service_text)}</i>\n\n"
         "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
-        "Это необходимо для предварительного оформления медицинской карты."
+        "Вы можете нажать кнопку ниже, чтобы использовать имя вашего профиля, "
+        "или ввести ФИО вручную:"
     )
-    await message.answer(text, reply_markup=get_cancel_inline_keyboard())
+    await message.answer(text, reply_markup=get_name_choice_keyboard(first_name))
+
+
+@dp.callback_query(BookingState.full_name, F.data.startswith("pick_name_"))
+async def cb_pick_name(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle 1-tap name selection on Step 2."""
+    name_val = callback.data.replace("pick_name_", "")
+    await state.update_data(full_name=name_val)
+    await state.set_state(BookingState.birth_year)
+
+    text = (
+        f"Принято, <b>{html.escape(name_val)}</b>!\n\n"
+        "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
+        "Выберите год на кнопках ниже или введите вручную (например: <code>1995</code>):"
+    )
+    await callback.message.answer(text, reply_markup=get_year_choice_keyboard())
+    await callback.answer()
 
 
 @dp.message(BookingState.full_name)
@@ -830,8 +1132,9 @@ async def process_full_name(message: Message, state: FSMContext) -> None:
     name_text = message.text.strip() if message.text else ""
     if len(name_text) < 3 or any(char.isdigit() for char in name_text):
         await message.answer(
-            "⚠️ Пожалуйста, введите корректные имя и фамилию (без цифр, например: <i>Каримов Тимур</i>):",
-            reply_markup=get_cancel_inline_keyboard(),
+            "⚠️ Пожалуйста, введите корректные имя и фамилию (без цифр, например: <i>Каримов Тимур</i>) "
+            "или нажмите кнопку с вашим именем ниже:",
+            reply_markup=get_name_choice_keyboard(message.from_user.first_name),
         )
         return
 
@@ -840,10 +1143,33 @@ async def process_full_name(message: Message, state: FSMContext) -> None:
 
     text = (
         f"Принято, <b>{html.escape(name_text)}</b>!\n\n"
-        "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (4 цифры, например: <code>1992</code>).\n\n"
-        "<i>Год рождения необходим для точного заведения амбулаторной карты.</i>"
+        "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
+        "Выберите год на кнопках ниже или введите вручную (например: <code>1995</code>):"
     )
-    await message.answer(text, reply_markup=get_cancel_inline_keyboard())
+    await message.answer(text, reply_markup=get_year_choice_keyboard())
+
+
+@dp.callback_query(BookingState.birth_year, F.data.startswith("pick_year_"))
+async def cb_pick_year(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle 1-tap birth year selection on Step 3."""
+    year_val = callback.data.replace("pick_year_", "")
+    if year_val == "custom":
+        await callback.message.answer(
+            "Введите ваш 4-значный год рождения (например: <code>1992</code>):",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    await state.update_data(birth_year=year_val)
+    await state.set_state(BookingState.address)
+
+    text = (
+        "<b>Шаг 4 из 5:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
+        "<i>(Или введите точный адрес/ориентир текстом)</i>"
+    )
+    await callback.message.answer(text, reply_markup=get_districts_keyboard())
+    await callback.answer()
 
 
 @dp.message(BookingState.birth_year)
@@ -854,8 +1180,8 @@ async def process_birth_year(message: Message, state: FSMContext) -> None:
 
     if not year_text.isdigit() or not (1920 <= int(year_text) <= current_year):
         await message.answer(
-            f"⚠️ Пожалуйста, введите корректный год рождения (от 1920 до {current_year}):",
-            reply_markup=get_cancel_inline_keyboard(),
+            f"⚠️ Пожалуйста, выберите год на кнопках или введите от 1920 до {current_year}:",
+            reply_markup=get_year_choice_keyboard(),
         )
         return
 
@@ -863,11 +1189,27 @@ async def process_birth_year(message: Message, state: FSMContext) -> None:
     await state.set_state(BookingState.address)
 
     text = (
-        "<b>Шаг 4 из 5:</b> Укажите ваш <b>район или адрес проживания</b>\n"
-        "<i>(например: Мирзо-Улугбекский район, ориентир: БИЙ)</i>.\n\n"
-        "Информация фиксируется в карточке пациента клиники."
+        "<b>Шаг 4 из 5:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
+        "<i>(Или введите точный адрес/ориентир текстом)</i>"
     )
-    await message.answer(text, reply_markup=get_cancel_inline_keyboard())
+    await message.answer(text, reply_markup=get_districts_keyboard())
+
+
+@dp.callback_query(BookingState.address, F.data.startswith("pick_dist_"))
+async def cb_pick_district(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle 1-tap district selection on Step 4."""
+    dist_val = callback.data.replace("pick_dist_", "")
+    await state.update_data(address=dist_val)
+    await state.set_state(BookingState.phone)
+
+    text = (
+        f"📍 <b>Район:</b> {html.escape(dist_val)}\n\n"
+        "<b>Шаг 5 из 5:</b> Отправьте ваш <b>контактный номер телефона</b>.\n\n"
+        "Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана "
+        "или введите номер вручную (например: <code>+998901234567</code>):"
+    )
+    await callback.message.answer(text, reply_markup=get_contact_reply_keyboard())
+    await callback.answer()
 
 
 @dp.message(BookingState.address)
@@ -876,8 +1218,8 @@ async def process_address(message: Message, state: FSMContext) -> None:
     address_text = message.text.strip() if message.text else ""
     if len(address_text) < 3:
         await message.answer(
-            "⚠️ Пожалуйста, укажите ваш район или ориентир (не менее 3 символов):",
-            reply_markup=get_cancel_inline_keyboard(),
+            "⚠️ Пожалуйста, выберите район кнопкой или укажите ориентир (не менее 3 символов):",
+            reply_markup=get_districts_keyboard(),
         )
         return
 
@@ -886,8 +1228,8 @@ async def process_address(message: Message, state: FSMContext) -> None:
 
     text = (
         "<b>Шаг 5 из 5:</b> Отправьте ваш <b>контактный номер телефона</b>.\n\n"
-        "Вы можете нажать на кнопку ниже <b>«📱 Поделиться контактом»</b> "
-        "или ввести номер вручную (например: <code>+998901234567</code>):"
+        "Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана "
+        "или введите номер вручную (например: <code>+998901234567</code>):"
     )
     await message.answer(text, reply_markup=get_contact_reply_keyboard())
 
@@ -908,7 +1250,7 @@ async def process_phone_and_finalize(message: Message, state: FSMContext, bot: B
         if len(digits_only) < 7:
             await message.answer(
                 "⚠️ Пожалуйста, введите корректный номер телефона (например: <code>+998901234567</code>) "
-                "или нажмите кнопку «📱 Поделиться контактом»:",
+                "или нажмите кнопку «📱 Поделиться контактом» внизу:",
                 reply_markup=get_contact_reply_keyboard(),
             )
             return
@@ -984,12 +1326,13 @@ async def process_phone_and_finalize(message: Message, state: FSMContext, bot: B
         f"<i>При возникновении срочных вопросов звоните нам 24/7:</i> <code>{CLINIC_PHONE}</code>"
     )
 
+    # Restore the persistent bottom keyboard
     await message.answer(
         user_confirm_text,
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=get_bottom_reply_keyboard(is_admin_user=is_manager(user_id)),
     )
     await message.answer(
-        "Вы можете ознакомиться с другими разделами клиники:",
+        "Вы можете воспользоваться разделами клиники в меню ниже:",
         reply_markup=get_main_menu_keyboard(is_admin_user=is_manager(user_id)),
     )
 
