@@ -10,10 +10,34 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 _startup_error = None
 try:
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
     from aiogram.types import Update
     import main
 except Exception as exc:
     _startup_error = traceback.format_exc()
+
+
+async def process_telegram_update(body: dict) -> None:
+    """
+    Process a single Telegram update with an isolated Bot session.
+    Prevents 'Event loop is closed' errors on serverless lambdas.
+    """
+    token = main.BOT_TOKEN
+    if not token or ":" not in token:
+        raise ValueError("BOT_TOKEN is not configured or invalid")
+
+    if main.HAS_DEFAULT_PROPERTIES:
+        bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    else:
+        bot = Bot(token=token, parse_mode=ParseMode.HTML)
+
+    try:
+        update = Update.model_validate(body, context={"bot": bot})
+        await main.dp.feed_update(bot=bot, update=update)
+    finally:
+        await bot.session.close()
 
 
 class handler(BaseHTTPRequestHandler):
@@ -30,30 +54,20 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(f"Startup Error:\n{_startup_error}".encode("utf-8"))
             return
 
-        if not main.bot:
-            self.send_response(500)
-            self.send_header("Content-type", "application/json")
-            self.end_headers()
-            self.wfile.write(
-                json.dumps({
-                    "ok": False,
-                    "error": "BOT_TOKEN is not configured in Vercel Environment Variables"
-                }).encode("utf-8")
-            )
-            return
-
         content_length = int(self.headers.get("Content-Length", 0))
         post_data = self.rfile.read(content_length)
 
         try:
             body = json.loads(post_data.decode("utf-8"))
-            update = Update.model_validate(body, context={"bot": main.bot})
-            asyncio_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(asyncio_loop)
-            asyncio_loop.run_until_complete(main.dp.feed_update(bot=main.bot, update=update))
-            asyncio_loop.close()
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(process_telegram_update(body))
+            finally:
+                loop.close()
         except Exception as exc:
             print(f"Error processing Telegram update: {exc}", file=sys.stderr)
+            traceback.print_exc()
 
         self.send_response(200)
         self.send_header("Content-type", "application/json")
@@ -69,7 +83,11 @@ class handler(BaseHTTPRequestHandler):
             self.wfile.write(f"Startup Error:\n{_startup_error}".encode("utf-8"))
             return
 
-        token_status = "configured" if main.bot else "MISSING (please add BOT_TOKEN in Vercel Environment Variables)"
+        token_status = (
+            "configured"
+            if main.BOT_TOKEN
+            else "MISSING (please add BOT_TOKEN in Vercel Environment Variables)"
+        )
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()

@@ -894,7 +894,7 @@ async def process_address(message: Message, state: FSMContext) -> None:
 
 @dp.message(BookingState.phone, F.contact)
 @dp.message(BookingState.phone, F.text)
-async def process_phone_and_finalize(message: Message, state: FSMContext) -> None:
+async def process_phone_and_finalize(message: Message, state: FSMContext, bot: Bot) -> None:
     """Process phone number, finalize lead, and alert clinic admins."""
     # Extract phone from contact or typed text
     if message.contact:
