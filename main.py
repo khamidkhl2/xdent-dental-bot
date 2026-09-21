@@ -285,9 +285,6 @@ def get_services_keyboard() -> InlineKeyboardMarkup:
     buttons.append(
         [InlineKeyboardButton(text="📝 Записаться на прием", callback_data="book_start")]
     )
-    buttons.append(
-        [InlineKeyboardButton(text="◀️ В главное меню", callback_data="menu_main")]
-    )
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -303,12 +300,7 @@ def get_service_detail_keyboard(service_key: str) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
-                    text="◀️ Назад к услугам", callback_data="menu_services"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🏠 В главное меню", callback_data="menu_main"
+                    text="◀️ Назад ко всем услугам", callback_data="menu_services"
                 )
             ],
         ]
@@ -324,11 +316,6 @@ def get_doctors_keyboard() -> InlineKeyboardMarkup:
                     text="📝 Записаться к врачу", callback_data="book_start"
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    text="◀️ В главное меню", callback_data="menu_main"
-                )
-            ],
         ]
     )
 
@@ -340,11 +327,6 @@ def get_location_keyboard() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(
                     text="📝 Записаться на прием", callback_data="book_start"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="◀️ В главное меню", callback_data="menu_main"
                 )
             ],
         ]
@@ -455,26 +437,24 @@ def get_name_choice_keyboard(first_name: Optional[str] = None) -> InlineKeyboard
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def get_year_choice_keyboard() -> InlineKeyboardMarkup:
-    """Inline buttons for quick birth year selection on Step 3."""
+def get_decade_choice_keyboard() -> InlineKeyboardMarkup:
+    """Level 1 of Year selection: Pick decade without skipping any year."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="1985", callback_data="pick_year_1985"),
-                InlineKeyboardButton(text="1990", callback_data="pick_year_1990"),
-                InlineKeyboardButton(text="1995", callback_data="pick_year_1995"),
+                InlineKeyboardButton(text="2000 — 2009", callback_data="decade_2000"),
+                InlineKeyboardButton(text="1990 — 1999", callback_data="decade_1990"),
             ],
             [
-                InlineKeyboardButton(text="1998", callback_data="pick_year_1998"),
-                InlineKeyboardButton(text="2000", callback_data="pick_year_2000"),
-                InlineKeyboardButton(text="2002", callback_data="pick_year_2002"),
+                InlineKeyboardButton(text="1980 — 1989", callback_data="decade_1980"),
+                InlineKeyboardButton(text="1970 — 1979", callback_data="decade_1970"),
             ],
             [
-                InlineKeyboardButton(text="2005", callback_data="pick_year_2005"),
-                InlineKeyboardButton(text="👶 Ребенок (до 14 лет)", callback_data="pick_year_2015"),
+                InlineKeyboardButton(text="👶 2010 — 2026 (Дети)", callback_data="decade_2010"),
+                InlineKeyboardButton(text="👴 1940 — 1969", callback_data="decade_1960"),
             ],
             [
-                InlineKeyboardButton(text="✍️ Ввести свой год", callback_data="pick_year_custom"),
+                InlineKeyboardButton(text="✍️ Ввести год сообщением", callback_data="pick_year_custom"),
             ],
             [
                 InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel"),
@@ -483,33 +463,71 @@ def get_year_choice_keyboard() -> InlineKeyboardMarkup:
     )
 
 
+def get_years_for_decade_keyboard(decade: str) -> InlineKeyboardMarkup:
+    """Level 2 of Year selection: Display every single year of the chosen decade."""
+    if decade == "2000":
+        years = list(range(2000, 2010))
+    elif decade == "1990":
+        years = list(range(1990, 2000))
+    elif decade == "1980":
+        years = list(range(1980, 1990))
+    elif decade == "1970":
+        years = list(range(1970, 1980))
+    elif decade == "2010":
+        years = list(range(2010, 2027))
+    elif decade == "1960":
+        years = list(range(1950, 1970))
+    else:
+        years = []
+
+    buttons = []
+    chunk_size = 3 if len(years) <= 12 else 4
+    for i in range(0, len(years), chunk_size):
+        row = [
+            InlineKeyboardButton(text=str(y), callback_data=f"pick_year_{y}")
+            for y in years[i : i + chunk_size]
+        ]
+        buttons.append(row)
+
+    buttons.append([
+        InlineKeyboardButton(text="◀️ Назад к периодам", callback_data="decade_back")
+    ])
+    buttons.append([
+        InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel")
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
 def get_districts_keyboard() -> InlineKeyboardMarkup:
-    """Inline buttons for Tashkent districts on Step 4."""
+    """Inline buttons for all 12 Tashkent districts on Step 4."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="Мирзо-Улугбекский", callback_data="pick_dist_Мирзо-Улугбекский"),
+                InlineKeyboardButton(text="⭐ Мирзо-Улугбекский (клиника)", callback_data="pick_dist_Мирзо-Улугбекский"),
+            ],
+            [
                 InlineKeyboardButton(text="Юнусабадский", callback_data="pick_dist_Юнусабадский"),
-            ],
-            [
                 InlineKeyboardButton(text="Чиланзарский", callback_data="pick_dist_Чиланзарский"),
+            ],
+            [
                 InlineKeyboardButton(text="Яшнабадский", callback_data="pick_dist_Яшнабадский"),
-            ],
-            [
                 InlineKeyboardButton(text="Мирабадский", callback_data="pick_dist_Мирабадский"),
+            ],
+            [
                 InlineKeyboardButton(text="Яккасарайский", callback_data="pick_dist_Яккасарайский"),
-            ],
-            [
                 InlineKeyboardButton(text="Шайхантахурский", callback_data="pick_dist_Шайхантахурский"),
-                InlineKeyboardButton(text="Алмазарский", callback_data="pick_dist_Алмазарский"),
             ],
             [
-                InlineKeyboardButton(text="Сергелийский", callback_data="pick_dist_Сергелийский"),
+                InlineKeyboardButton(text="Алмазарский", callback_data="pick_dist_Алмазарский"),
                 InlineKeyboardButton(text="Учтепинский", callback_data="pick_dist_Учтепинский"),
             ],
             [
+                InlineKeyboardButton(text="Сергелийский", callback_data="pick_dist_Сергелийский"),
                 InlineKeyboardButton(text="Янгихаётский", callback_data="pick_dist_Янгихаётский"),
-                InlineKeyboardButton(text="Другой регион / область", callback_data="pick_dist_Другой регион"),
+            ],
+            [
+                InlineKeyboardButton(text="Бектемирский", callback_data="pick_dist_Бектемирский"),
+                InlineKeyboardButton(text="Таш. область / Другой", callback_data="pick_dist_Ташкентская область"),
             ],
             [
                 InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel"),
@@ -703,12 +721,18 @@ async def cb_admin_as_client(callback: CallbackQuery, state: FSMContext) -> None
     user_id = callback.from_user.id
     text = (
         f"🦷 <b>Режим предпросмотра пациента — {CLINIC_NAME}</b>\n\n"
-        f"Вы перешли в интерфейс пациента. Здесь можно протестировать меню и оформление заявки.\n\n"
-        f"<i>(Для возврата в панель управления нажмите верхнюю кнопку или введите /admin)</i>"
+        f"Вы перешли в интерфейс пациента. Здесь можно протестировать запись и все разделы.\n\n"
+        f"Для навигации используйте кнопки меню прямо под полем ввода 👇\n\n"
+        f"<i>(Для возврата в панель администратора нажмите «👨‍💼 Панель администратора» внизу или введите /admin)</i>"
     )
     await callback.message.edit_text(
         text,
-        reply_markup=get_main_menu_keyboard(is_admin_user=True),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📝 Начать запись на прием", callback_data="book_start")],
+                [InlineKeyboardButton(text="◀️ В панель администратора", callback_data="admin_panel")],
+            ]
+        ),
     )
     await callback.answer()
 
@@ -902,16 +926,19 @@ async def cb_lead_reject(callback: CallbackQuery) -> None:
 
 @dp.callback_query(F.data == "menu_main")
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
-    """Return to main menu."""
+    """Return to main menu guidance."""
     await state.clear()
-    user_id = callback.from_user.id
     text = (
         f"Главное меню цифровой приемной <b>{CLINIC_NAME}</b> 🦷\n\n"
-        f"Чем мы можем вам помочь?"
+        f"Для навигации по услугам, врачам и клинике используйте кнопки прямо под полем ввода 👇"
     )
     await callback.message.edit_text(
         text,
-        reply_markup=get_main_menu_keyboard(is_admin_user=is_manager(user_id)),
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="📝 Записаться на прием", callback_data="book_start")]
+            ]
+        ),
     )
     await callback.answer()
 
@@ -1109,9 +1136,9 @@ async def cb_pick_name(callback: CallbackQuery, state: FSMContext) -> None:
     text = (
         f"Принято, <b>{html.escape(name_val)}</b>!\n\n"
         "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
-        "Выберите год на кнопках ниже или введите вручную (например: <code>1995</code>):"
+        "Выберите период ниже или введите год сообщением (например: <code>1995</code>):"
     )
-    await callback.message.answer(text, reply_markup=get_year_choice_keyboard())
+    await callback.message.edit_text(text, reply_markup=get_decade_choice_keyboard())
     await callback.answer()
 
 
@@ -1133,9 +1160,39 @@ async def process_full_name(message: Message, state: FSMContext) -> None:
     text = (
         f"Принято, <b>{html.escape(name_text)}</b>!\n\n"
         "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
-        "Выберите год на кнопках ниже или введите вручную (например: <code>1995</code>):"
+        "Выберите период ниже или введите год сообщением (например: <code>1995</code>):"
     )
-    await message.answer(text, reply_markup=get_year_choice_keyboard())
+    await message.answer(text, reply_markup=get_decade_choice_keyboard())
+
+
+@dp.callback_query(BookingState.birth_year, F.data.startswith("decade_"))
+async def cb_decade_select(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle decade selection and drill down into individual years without skipping."""
+    decade_key = callback.data.replace("decade_", "")
+    if decade_key == "back":
+        await callback.message.edit_text(
+            "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
+            "Выберите период ниже или введите год сообщением (например: <code>1995</code>):",
+            reply_markup=get_decade_choice_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    decade_labels = {
+        "2000": "2000 — 2009",
+        "1990": "1990 — 1999",
+        "1980": "1980 — 1989",
+        "1970": "1970 — 1979",
+        "2010": "2010 — 2026 (Дети)",
+        "1960": "1940 — 1969",
+    }
+    label = decade_labels.get(decade_key, decade_key)
+    await callback.message.edit_text(
+        f"📅 <b>Период: {label}</b>\n\n"
+        f"Выберите ваш точный год рождения или введите его сообщением (например: <code>1995</code>):",
+        reply_markup=get_years_for_decade_keyboard(decade_key),
+    )
+    await callback.answer()
 
 
 @dp.callback_query(BookingState.birth_year, F.data.startswith("pick_year_"))
@@ -1144,7 +1201,7 @@ async def cb_pick_year(callback: CallbackQuery, state: FSMContext) -> None:
     year_val = callback.data.replace("pick_year_", "")
     if year_val == "custom":
         await callback.message.answer(
-            "Введите ваш 4-значный год рождения (например: <code>1992</code>):",
+            "Введите ваш 4-значный год рождения сообщением (например: <code>1992</code>):",
             reply_markup=get_cancel_inline_keyboard(),
         )
         await callback.answer()
@@ -1154,10 +1211,11 @@ async def cb_pick_year(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(BookingState.address)
 
     text = (
+        f"📅 Год рождения: <b>{year_val}</b>\n\n"
         "<b>Шаг 4 из 5:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
         "<i>(Или введите точный адрес/ориентир текстом)</i>"
     )
-    await callback.message.answer(text, reply_markup=get_districts_keyboard())
+    await callback.message.edit_text(text, reply_markup=get_districts_keyboard())
     await callback.answer()
 
 
@@ -1169,8 +1227,8 @@ async def process_birth_year(message: Message, state: FSMContext) -> None:
 
     if not year_text.isdigit() or not (1920 <= int(year_text) <= current_year):
         await message.answer(
-            f"⚠️ Пожалуйста, выберите год на кнопках или введите от 1920 до {current_year}:",
-            reply_markup=get_year_choice_keyboard(),
+            f"⚠️ Пожалуйста, выберите период на кнопках или введите корректный 4-значный год от 1920 до {current_year}:",
+            reply_markup=get_decade_choice_keyboard(),
         )
         return
 
@@ -1178,6 +1236,7 @@ async def process_birth_year(message: Message, state: FSMContext) -> None:
     await state.set_state(BookingState.address)
 
     text = (
+        f"📅 Год рождения: <b>{year_text}</b>\n\n"
         "<b>Шаг 4 из 5:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
         "<i>(Или введите точный адрес/ориентир текстом)</i>"
     )
