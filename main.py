@@ -50,6 +50,24 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "").strip()
 
+# Administrator / Manager IDs (Hardcoded fallback + environment variable)
+ADMIN_IDS: set[int] = {5831301324}
+if ADMIN_CHAT_ID:
+    try:
+        ADMIN_IDS.add(int(ADMIN_CHAT_ID))
+    except ValueError:
+        pass
+
+
+def is_manager(user_id: int) -> bool:
+    """Check if the Telegram user ID belongs to a clinic manager/admin."""
+    return user_id in ADMIN_IDS
+
+
+# In-memory store of recent leads for manager inspection
+RECENT_LEADS: list[dict] = []
+MAX_RECENT_LEADS = 30
+
 CLINIC_NAME = "Dr. Shoxruz XDENT Dental Clinic"
 CLINIC_ADDRESS = "г. Ташкент, пр-т Мирзо Улугбека"
 CLINIC_PHONE = "+998 95 111 11 61"
@@ -161,32 +179,85 @@ class BookingState(StatesGroup):
 # ---------------------------------------------------------------------------
 # Keyboards Builder
 # ---------------------------------------------------------------------------
-def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+def get_main_menu_keyboard(is_admin_user: bool = False) -> InlineKeyboardMarkup:
     """Main menu inline keyboard."""
+    buttons = []
+    if is_admin_user:
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text="👨‍💼 Панель администратора", callback_data="admin_panel"
+                )
+            ]
+        )
+    buttons.extend([
+        [
+            InlineKeyboardButton(
+                text="🦷 Услуги и цены", callback_data="menu_services"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="👨‍⚕️ Наши врачи и направления", callback_data="menu_doctors"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📝 Записаться на прием", callback_data="book_start"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text="📍 Локация и контакты", callback_data="menu_location"
+            )
+        ],
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_admin_panel_keyboard() -> InlineKeyboardMarkup:
+    """Manager/Admin panel keyboard."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🦷 Услуги и цены", callback_data="menu_services"
-                )
+                    text="📋 Последние заявки", callback_data="admin_recent_leads"
+                ),
+                InlineKeyboardButton(
+                    text="📊 Статистика", callback_data="admin_stats"
+                ),
             ],
             [
                 InlineKeyboardButton(
-                    text="👨‍⚕️ Наши врачи и направления", callback_data="menu_doctors"
-                )
+                    text="🧪 Отправить тестовую заявку", callback_data="admin_test_lead"
+                ),
             ],
             [
                 InlineKeyboardButton(
-                    text="📝 Записаться на прием", callback_data="book_start"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="📍 Локация и контакты", callback_data="menu_location"
-                )
+                    text="🦷 Открыть меню пациента (тест)", callback_data="admin_as_client"
+                ),
             ],
         ]
     )
+
+
+def get_lead_actions_keyboard(lead_id: int, current_status: str = "new") -> InlineKeyboardMarkup:
+    """Action buttons attached to lead notifications sent to managers."""
+    buttons = []
+    if current_status == "new":
+        buttons.append([
+            InlineKeyboardButton(text="✅ В работу", callback_data=f"lead_take_{lead_id}"),
+            InlineKeyboardButton(text="📞 Подтверждено", callback_data=f"lead_confirm_{lead_id}"),
+        ])
+        buttons.append([
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"lead_reject_{lead_id}"),
+        ])
+    elif current_status == "in_progress":
+        buttons.append([
+            InlineKeyboardButton(text="📞 Подтверждено", callback_data=f"lead_confirm_{lead_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"lead_reject_{lead_id}"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def get_services_keyboard() -> InlineKeyboardMarkup:
@@ -311,6 +382,23 @@ dp = Dispatcher(storage=MemoryStorage())
 async def cmd_start(message: Message, state: FSMContext) -> None:
     """Handler for /start command."""
     await state.clear()
+    user_id = message.from_user.id
+
+    # If the user is an authorized manager
+    if is_manager(user_id):
+        admin_name = html.escape(message.from_user.first_name or "Менеджер")
+        greeting = (
+            f"👨‍💼 <b>Кабинет администратора — {CLINIC_NAME}</b>\n\n"
+            f"Здравствуйте, <b>{admin_name}</b>!\n"
+            f"Вы авторизованы как <b>Управляющий / Администратор</b> (ID: <code>{user_id}</code>).\n\n"
+            f"✅ Уведомления о новых пациентах: <b>АКТИВНЫ</b>\n"
+            f"Все новые записи пациентов автоматически поступают в этот чат с деталями, контактами и адресом.\n\n"
+            f"Выберите действие в панели администратора:"
+        )
+        await message.answer(greeting, reply_markup=get_admin_panel_keyboard())
+        return
+
+    # Normal patient / client flow
     first_name = html.escape(message.from_user.first_name or "Гость")
     greeting = (
         f"Здравствуйте, <b>{first_name}</b>!\n\n"
@@ -321,19 +409,266 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     )
     await message.answer(
         greeting,
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(is_admin_user=False),
     )
+
+
+@dp.message(Command("admin"))
+async def cmd_admin(message: Message, state: FSMContext) -> None:
+    """Direct command to open the Manager Panel."""
+    await state.clear()
+    user_id = message.from_user.id
+    if not is_manager(user_id):
+        await message.answer(
+            "⛔ <i>Доступ ограничен. Данный раздел доступен только администраторам клиники Dr. Shoxruz XDENT.</i>"
+        )
+        return
+
+    admin_name = html.escape(message.from_user.first_name or "Менеджер")
+    text = (
+        f"👨‍💼 <b>Панель администратора — {CLINIC_NAME}</b>\n\n"
+        f"Администратор: <b>{admin_name}</b> (ID: <code>{user_id}</code>)\n"
+        f"Управление записями и мониторинг:"
+    )
+    await message.answer(text, reply_markup=get_admin_panel_keyboard())
+
+
+@dp.callback_query(F.data == "admin_panel")
+async def cb_admin_panel(callback: CallbackQuery, state: FSMContext) -> None:
+    """Callback to return to the Manager Panel."""
+    await state.clear()
+    user_id = callback.from_user.id
+    if not is_manager(user_id):
+        await callback.answer("⛔ Доступ ограничен", show_alert=True)
+        return
+
+    admin_name = html.escape(callback.from_user.first_name or "Менеджер")
+    text = (
+        f"👨‍💼 <b>Панель администратора — {CLINIC_NAME}</b>\n\n"
+        f"Администратор: <b>{admin_name}</b> (ID: <code>{user_id}</code>)\n"
+        f"Управление записями и мониторинг:"
+    )
+    await callback.message.edit_text(text, reply_markup=get_admin_panel_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_as_client")
+async def cb_admin_as_client(callback: CallbackQuery, state: FSMContext) -> None:
+    """Allow manager to preview/test the client menu."""
+    await state.clear()
+    user_id = callback.from_user.id
+    text = (
+        f"🦷 <b>Режим предпросмотра пациента — {CLINIC_NAME}</b>\n\n"
+        f"Вы перешли в интерфейс пациента. Здесь можно протестировать меню и оформление заявки.\n\n"
+        f"<i>(Для возврата в панель управления нажмите верхнюю кнопку или введите /admin)</i>"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_main_menu_keyboard(is_admin_user=True),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_recent_leads")
+async def cb_admin_recent_leads(callback: CallbackQuery) -> None:
+    """Display recent patient leads."""
+    if not is_manager(callback.from_user.id):
+        await callback.answer("⛔ Доступ ограничен", show_alert=True)
+        return
+
+    if not RECENT_LEADS:
+        text = (
+            "📋 <b>Последние заявки пациентов</b>\n\n"
+            "<i>Заявок в текущей сессии пока нет.</i>\n\n"
+            "Вы можете нажать кнопку «🧪 Отправить тестовую заявку», чтобы проверить формат оповещений."
+        )
+    else:
+        text = f"📋 <b>Последние заявки пациентов (всего: {len(RECENT_LEADS)})</b>:\n\n"
+        for lead in reversed(RECENT_LEADS[-10:]):
+            text += (
+                f"#{lead['id']} • <b>{html.escape(lead['full_name'])}</b> ({lead['status']})\n"
+                f"   🛠 {html.escape(lead['service'])}\n"
+                f"   📞 {html.escape(lead['phone'])} | 📅 {lead['birth_year']} г.р.\n"
+                f"   ⏱ {lead['timestamp']}\n\n"
+            )
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_recent_leads")],
+            [InlineKeyboardButton(text="◀️ В панель администратора", callback_data="admin_panel")],
+        ]
+    )
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_stats")
+async def cb_admin_stats(callback: CallbackQuery) -> None:
+    """Display lead statistics."""
+    if not is_manager(callback.from_user.id):
+        await callback.answer("⛔ Доступ ограничен", show_alert=True)
+        return
+
+    total = len(RECENT_LEADS)
+    new_count = sum(1 for l in RECENT_LEADS if l.get("status_key") == "new")
+    in_progress = sum(1 for l in RECENT_LEADS if l.get("status_key") == "in_progress")
+    confirmed = sum(1 for l in RECENT_LEADS if l.get("status_key") == "confirmed")
+    rejected = sum(1 for l in RECENT_LEADS if l.get("status_key") == "rejected")
+
+    text = (
+        f"📊 <b>Статистика цифровой приемной — {CLINIC_NAME}</b>\n\n"
+        f"• Всего поступило заявок: <b>{total}</b>\n"
+        f"• Новые заявки: <b>{new_count}</b> 🟡\n"
+        f"• В обработке: <b>{in_progress}</b> 🔵\n"
+        f"• Подтвержденных: <b>{confirmed}</b> 🟢\n"
+        f"• Отклоненных: <b>{rejected}</b> 🔴\n\n"
+        f"🕒 Время сервера: {datetime.now(TASHKENT_TZ).strftime('%d.%m.%Y %H:%M:%S')} (Ташкент)"
+    )
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="admin_stats")],
+            [InlineKeyboardButton(text="◀️ В панель администратора", callback_data="admin_panel")],
+        ]
+    )
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_test_lead")
+async def cb_admin_test_lead(callback: CallbackQuery) -> None:
+    """Send a test patient lead card to verify notification formatting."""
+    if not is_manager(callback.from_user.id):
+        await callback.answer("⛔ Доступ ограничен", show_alert=True)
+        return
+
+    lead_id = len(RECENT_LEADS) + 1
+    timestamp = datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M:%S")
+    test_lead = {
+        "id": lead_id,
+        "full_name": "Каримов Тимур (Тестовый пациент)",
+        "birth_year": "1994",
+        "address": "Мирзо-Улугбекский р-н, ул. БИЙ",
+        "service": "Первичная консультация и диагностика",
+        "phone": "+998901234567",
+        "timestamp": timestamp,
+        "username": "test_patient",
+        "status": "🟡 Новая",
+        "status_key": "new",
+    }
+    RECENT_LEADS.append(test_lead)
+
+    test_lead_text = (
+        "🦷 <b>НОВАЯ ЗАПИСЬ НА ПРИЕМ (XDENT) — ТЕСТ</b>\n\n"
+        f"👤 <b>Пациент:</b> Каримов Тимур (Тестовый пациент) (@test_patient)\n"
+        f"📅 <b>Год рождения:</b> 1994\n"
+        f"📍 <b>Адрес:</b> Мирзо-Улугбекский р-н, ул. БИЙ\n"
+        f"🛠 <b>Услуга:</b> Первичная консультация и диагностика\n"
+        f"📞 <b>Телефон:</b> <code>+998901234567</code>\n"
+        f"⏱ <b>Время заявки:</b> {timestamp} (Ташкент)\n"
+        f"📌 <b>Статус:</b> 🟡 Новая"
+    )
+
+    await callback.message.answer(
+        test_lead_text,
+        reply_markup=get_lead_actions_keyboard(lead_id, current_status="new"),
+    )
+    await callback.answer("✅ Тестовая заявка отправлена!")
+
+
+@dp.callback_query(F.data.startswith("lead_take_"))
+async def cb_lead_take(callback: CallbackQuery) -> None:
+    """Manager takes lead into processing."""
+    if not is_manager(callback.from_user.id):
+        await callback.answer("⛔ Доступ ограничен", show_alert=True)
+        return
+
+    lead_id = int(callback.data.replace("lead_take_", ""))
+    manager_name = html.escape(callback.from_user.first_name or "Менеджер")
+
+    for l in RECENT_LEADS:
+        if l["id"] == lead_id:
+            l["status"] = f"🔵 В работе ({manager_name})"
+            l["status_key"] = "in_progress"
+            break
+
+    current_text = callback.message.html_text or callback.message.text
+    if "📌 <b>Статус:</b>" in current_text:
+        new_text = current_text.split("📌 <b>Статус:</b>")[0] + f"📌 <b>Статус:</b> 🔵 В работе ({manager_name})"
+    else:
+        new_text = current_text + f"\n\n📌 <b>Статус:</b> 🔵 В работе ({manager_name})"
+
+    await callback.message.edit_text(
+        new_text,
+        reply_markup=get_lead_actions_keyboard(lead_id, current_status="in_progress"),
+    )
+    await callback.answer("✅ Заявка принята в работу")
+
+
+@dp.callback_query(F.data.startswith("lead_confirm_"))
+async def cb_lead_confirm(callback: CallbackQuery) -> None:
+    """Manager confirms appointment with patient."""
+    if not is_manager(callback.from_user.id):
+        await callback.answer("⛔ Доступ ограничен", show_alert=True)
+        return
+
+    lead_id = int(callback.data.replace("lead_confirm_", ""))
+    manager_name = html.escape(callback.from_user.first_name or "Менеджер")
+
+    for l in RECENT_LEADS:
+        if l["id"] == lead_id:
+            l["status"] = f"🟢 Подтверждено ({manager_name})"
+            l["status_key"] = "confirmed"
+            break
+
+    current_text = callback.message.html_text or callback.message.text
+    if "📌 <b>Статус:</b>" in current_text:
+        new_text = current_text.split("📌 <b>Статус:</b>")[0] + f"📌 <b>Статус:</b> 🟢 Подтверждено ({manager_name})"
+    else:
+        new_text = current_text + f"\n\n📌 <b>Статус:</b> 🟢 Подтверждено ({manager_name})"
+
+    await callback.message.edit_text(new_text, reply_markup=None)
+    await callback.answer("🎉 Запись подтверждена!")
+
+
+@dp.callback_query(F.data.startswith("lead_reject_"))
+async def cb_lead_reject(callback: CallbackQuery) -> None:
+    """Manager rejects / cancels lead."""
+    if not is_manager(callback.from_user.id):
+        await callback.answer("⛔ Доступ ограничен", show_alert=True)
+        return
+
+    lead_id = int(callback.data.replace("lead_reject_", ""))
+    manager_name = html.escape(callback.from_user.first_name or "Менеджер")
+
+    for l in RECENT_LEADS:
+        if l["id"] == lead_id:
+            l["status"] = f"🔴 Отклонено ({manager_name})"
+            l["status_key"] = "rejected"
+            break
+
+    current_text = callback.message.html_text or callback.message.text
+    if "📌 <b>Статус:</b>" in current_text:
+        new_text = current_text.split("📌 <b>Статус:</b>")[0] + f"📌 <b>Статус:</b> 🔴 Отклонено ({manager_name})"
+    else:
+        new_text = current_text + f"\n\n📌 <b>Статус:</b> 🔴 Отклонено ({manager_name})"
+
+    await callback.message.edit_text(new_text, reply_markup=None)
+    await callback.answer("❌ Заявка отклонена")
 
 
 @dp.callback_query(F.data == "menu_main")
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     """Return to main menu."""
     await state.clear()
+    user_id = callback.from_user.id
     text = (
         f"Главное меню цифровой приемной <b>{CLINIC_NAME}</b> 🦷\n\n"
         f"Чем мы можем вам помочь?"
     )
-    await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_main_menu_keyboard(is_admin_user=is_manager(user_id)),
+    )
     await callback.answer()
 
 
@@ -589,6 +924,22 @@ async def process_phone_and_finalize(message: Message, state: FSMContext) -> Non
     service = data.get("service", "Не указано")
     timestamp = datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M:%S")
 
+    # Record lead in memory store
+    lead_id = len(RECENT_LEADS) + 1
+    lead_record = {
+        "id": lead_id,
+        "full_name": full_name,
+        "birth_year": birth_year,
+        "address": address,
+        "service": service,
+        "phone": phone_number,
+        "timestamp": timestamp,
+        "username": message.from_user.username,
+        "status": "🟡 Новая",
+        "status_key": "new",
+    }
+    RECENT_LEADS.append(lead_record)
+
     # Format user reference
     user_id = message.from_user.id
     if message.from_user.username:
@@ -604,21 +955,21 @@ async def process_phone_and_finalize(message: Message, state: FSMContext) -> Non
         f"📍 <b>Адрес:</b> {html.escape(address)}\n"
         f"🛠 <b>Услуга:</b> {html.escape(service)}\n"
         f"📞 <b>Телефон:</b> <code>{html.escape(phone_number)}</code>\n"
-        f"⏱ <b>Время заявки:</b> {timestamp} (Ташкент)"
+        f"⏱ <b>Время заявки:</b> {timestamp} (Ташкент)\n"
+        f"📌 <b>Статус:</b> 🟡 Новая"
     )
 
-    # Dispatch to ADMIN_CHAT_ID if configured
-    if ADMIN_CHAT_ID and ADMIN_CHAT_ID != "YOUR_ADMIN_CHAT_ID_HERE":
+    # Dispatch to all authorized manager chats
+    for target_chat_id in ADMIN_IDS:
         try:
             await bot.send_message(
-                chat_id=ADMIN_CHAT_ID,
+                chat_id=target_chat_id,
                 text=admin_lead_text,
+                reply_markup=get_lead_actions_keyboard(lead_id, current_status="new"),
             )
-            logger.info("Successfully dispatched lead to admin chat: %s", ADMIN_CHAT_ID)
+            logger.info("Successfully dispatched lead #%d to manager chat: %s", lead_id, target_chat_id)
         except Exception as exc:
-            logger.error("Failed to send lead to admin chat %s: %s", ADMIN_CHAT_ID, exc)
-    else:
-        logger.warning("ADMIN_CHAT_ID is not configured. Lead output:\n%s", admin_lead_text)
+            logger.error("Failed to send lead to manager chat %s: %s", target_chat_id, exc)
 
     # User confirmation message
     user_confirm_text = (
@@ -639,7 +990,7 @@ async def process_phone_and_finalize(message: Message, state: FSMContext) -> Non
     )
     await message.answer(
         "Вы можете ознакомиться с другими разделами клиники:",
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(is_admin_user=is_manager(user_id)),
     )
 
 
