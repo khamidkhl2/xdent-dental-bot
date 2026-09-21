@@ -1,0 +1,666 @@
+"""
+Telegram Bot for "Dr. Shoxruz XDENT Dental Clinic" (Tashkent).
+Built with aiogram 3.x.
+
+Automates patient intake (Full Name, Birth Year, District/Address, Phone)
+and dispatches structured leads to clinic administrators in real time.
+"""
+
+import asyncio
+import html
+import logging
+import os
+import sys
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+
+from dotenv import load_dotenv
+
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart, Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
+
+# Optional import for compatibility across aiogram 3.x minor versions
+try:
+    from aiogram.client.default import DefaultBotProperties
+    HAS_DEFAULT_PROPERTIES = True
+except ImportError:
+    HAS_DEFAULT_PROPERTIES = False
+
+# ---------------------------------------------------------------------------
+# Configuration & Constants
+# ---------------------------------------------------------------------------
+load_dotenv()
+
+# Placeholders or environment variables
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "YOUR_ADMIN_CHAT_ID_HERE")
+
+CLINIC_NAME = "Dr. Shoxruz XDENT Dental Clinic"
+CLINIC_ADDRESS = "г. Ташкент, пр-т Мирзо Улугбека"
+CLINIC_PHONE = "+998 95 111 11 61"
+CLINIC_SCHEDULE = "24/7 (Круглосуточно, без выходных)"
+CLINIC_LATITUDE = 41.3275
+CLINIC_LONGITUDE = 69.3297
+
+# Tashkent Timezone (UTC+5)
+TASHKENT_TZ = timezone(timedelta(hours=5))
+
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Catalog Data: Services & Doctors
+# ---------------------------------------------------------------------------
+SERVICES_DATA = {
+    "consultation": {
+        "title": "Первичная консультация и диагностика",
+        "description": (
+            "🔍 <b>Первичная консультация и диагностика</b>\n\n"
+            "Комплексный осмотр ведущим специалистом с применением "
+            "дентального микроскопа и фотопротокола.\n\n"
+            "💳 <b>Стоимость:</b>\n"
+            "• Консультация + цифровой снимок: <b>150 000 сум</b>\n"
+            "<i>(При продолжении лечения в клинике — БЕСПЛАТНО)</i>\n\n"
+            "Включает составление персонального плана лечения и сметы."
+        ),
+    },
+    "therapy": {
+        "title": "Терапия и чистка",
+        "description": (
+            "✨ <b>Терапия и профессиональная гигиена</b>\n\n"
+            "Лечение зубов с сохранением максимального объема здоровых тканей:\n\n"
+            "💳 <b>Стоимость:</b>\n"
+            "• Ультразвуковая чистка + AirFlow: <b>от 450 000 сум</b>\n"
+            "• Лечение кариеса (эстетическая реставрация): <b>от 350 000 сум</b>\n"
+            "• Лечение каналов под микроскопом: <b>от 600 000 сум</b>"
+        ),
+    },
+    "orthodontics": {
+        "title": "Ортодонтия (Брекеты / Элайнеры)",
+        "description": (
+            "🦷 <b>Ортодонтия и исправление прикуса</b>\n\n"
+            "Современные методы коррекции прикуса для детей и взрослых:\n\n"
+            "💳 <b>Стоимость:</b>\n"
+            "• Первичный ортодонтический осмотр и слепки: <b>от 200 000 сум</b>\n"
+            "• Металлические брекет-системы: <b>от 4 500 000 сум</b> (на одну челюсть)\n"
+            "• Керамические / сапфировые брекеты: <b>от 7 000 000 сум</b>\n"
+            "• Прозрачные элайнеры: <b>индивидуальный расчет</b>"
+        ),
+    },
+    "surgery": {
+        "title": "Хирургия и имплантация",
+        "description": (
+            "⚙️ <b>Хирургия и имплантация зубов</b>\n\n"
+            "Безболезненные хирургические манипуляции и импланты премиум-класса:\n\n"
+            "💳 <b>Стоимость:</b>\n"
+            "• Простое / сложное удаление зуба: <b>от 250 000 сум</b>\n"
+            "• Удаление зуба мудрости: <b>от 500 000 сум</b>\n"
+            "• Установка дентального импланта под ключ (Osstem, Dentium, Straumann): <b>от 3 500 000 сум</b>"
+        ),
+    },
+    "pediatric": {
+        "title": "Детская стоматология",
+        "description": (
+            "🧸 <b>Детская стоматология без страха и слез</b>\n\n"
+            "Адаптационный прием, бережное отношение и лечение в игровой форме:\n\n"
+            "💳 <b>Стоимость:</b>\n"
+            "• Адаптационный осмотр и фторирование: <b>от 150 000 сум</b>\n"
+            "• Лечение молочного зуба: <b>от 250 000 сум</b>\n"
+            "• Герметизация фиссур: <b>от 180 000 сум</b>"
+        ),
+    },
+}
+
+DOCTORS_TEXT = (
+    "👨‍⚕️ <b>Наши врачи и направления — Dr. Shoxruz XDENT</b>\n\n"
+    "👑 <b>Главный врач: Др. Шохруз</b>\n"
+    "• <i>Ведущий хирург-имплантолог, опыт более 12 лет</i>\n"
+    "• Специализация: сложная тотальная имплантация, костная пластика, синус-лифтинг.\n\n"
+    "💎 <b>Врач-терапевт: Др. Нигора</b>\n"
+    "• <i>Эстетическая стоматология и эндодонтия</i>\n"
+    "• Специализация: художественная реставрация зубов, лечение каналов под микроскопом.\n\n"
+    "📐 <b>Врач-ортодонт: Др. Сардор</b>\n"
+    "• <i>Эксперт по коррекции прикуса</i>\n"
+    "• Специализация: самолигирующие брекет-системы, невидимые элайнеры.\n\n"
+    "🧸 <b>Детский врач-стоматолог: Др. Мадина</b>\n"
+    "• <i>Детский стоматолог-психолог</i>\n"
+    "• Специализация: лечение кариеса без бормашины (Icon), адаптация деток."
+)
+
+# ---------------------------------------------------------------------------
+# FSM States
+# ---------------------------------------------------------------------------
+class BookingState(StatesGroup):
+    service = State()     # Selected or typed service/problem
+    full_name = State()   # Patient's Full Name (ФИО)
+    birth_year = State()  # Year of birth (Год рождения)
+    address = State()     # District or home address
+    phone = State()       # Phone number (contact or text)
+
+
+# ---------------------------------------------------------------------------
+# Keyboards Builder
+# ---------------------------------------------------------------------------
+def get_main_menu_keyboard() -> InlineKeyboardMarkup:
+    """Main menu inline keyboard."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🦷 Услуги и цены", callback_data="menu_services"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="👨‍⚕️ Наши врачи и направления", callback_data="menu_doctors"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📝 Записаться на прием", callback_data="book_start"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📍 Локация и контакты", callback_data="menu_location"
+                )
+            ],
+        ]
+    )
+
+
+def get_services_keyboard() -> InlineKeyboardMarkup:
+    """Services list keyboard."""
+    buttons = []
+    for key, data in SERVICES_DATA.items():
+        buttons.append(
+            [InlineKeyboardButton(text=f"• {data['title']}", callback_data=f"svc_{key}")]
+        )
+    buttons.append(
+        [InlineKeyboardButton(text="📝 Записаться на прием", callback_data="book_start")]
+    )
+    buttons.append(
+        [InlineKeyboardButton(text="◀️ В главное меню", callback_data="menu_main")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_service_detail_keyboard(service_key: str) -> InlineKeyboardMarkup:
+    """Service detail screen keyboard."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📝 Записаться на эту услугу",
+                    callback_data=f"book_with_svc_{service_key}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ Назад к услугам", callback_data="menu_services"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🏠 В главное меню", callback_data="menu_main"
+                )
+            ],
+        ]
+    )
+
+
+def get_doctors_keyboard() -> InlineKeyboardMarkup:
+    """Doctors screen keyboard."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📝 Записаться к врачу", callback_data="book_start"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ В главное меню", callback_data="menu_main"
+                )
+            ],
+        ]
+    )
+
+
+def get_location_keyboard() -> InlineKeyboardMarkup:
+    """Location screen keyboard."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="📝 Записаться на прием", callback_data="book_start"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="◀️ В главное меню", callback_data="menu_main"
+                )
+            ],
+        ]
+    )
+
+
+def get_cancel_inline_keyboard() -> InlineKeyboardMarkup:
+    """Inline button to cancel FSM process."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel")]
+        ]
+    )
+
+
+def get_contact_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Reply keyboard requesting user contact."""
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📱 Поделиться контактом", request_contact=True)],
+            [KeyboardButton(text="❌ Отменить запись")],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bot & Dispatcher Setup
+# ---------------------------------------------------------------------------
+if HAS_DEFAULT_PROPERTIES:
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+else:
+    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+
+dp = Dispatcher(storage=MemoryStorage())
+
+
+# ---------------------------------------------------------------------------
+# General Handlers & Navigation
+# ---------------------------------------------------------------------------
+@dp.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext) -> None:
+    """Handler for /start command."""
+    await state.clear()
+    first_name = html.escape(message.from_user.first_name or "Гость")
+    greeting = (
+        f"Здравствуйте, <b>{first_name}</b>!\n\n"
+        f"Добро пожаловать в цифровую приемную клиники <b>{CLINIC_NAME}</b> 🦷\n\n"
+        f"Мы предоставляем полный спектр премиальной стоматологической помощи "
+        f"в Ташкенте с использованием передового европейского оборудования.\n\n"
+        f"Выберите интересующий вас раздел в меню ниже:"
+    )
+    await message.answer(
+        greeting,
+        reply_markup=get_main_menu_keyboard(),
+    )
+
+
+@dp.callback_query(F.data == "menu_main")
+async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
+    """Return to main menu."""
+    await state.clear()
+    text = (
+        f"Главное меню цифровой приемной <b>{CLINIC_NAME}</b> 🦷\n\n"
+        f"Чем мы можем вам помочь?"
+    )
+    await callback.message.edit_text(text, reply_markup=get_main_menu_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_services")
+async def cb_services_menu(callback: CallbackQuery) -> None:
+    """Show services categories."""
+    text = (
+        "🦷 <b>Услуги и цены клиники Dr. Shoxruz XDENT</b>\n\n"
+        "Мы придерживаемся политики открытых и честных цен без скрытых доплат. "
+        "Выберите направление стоматологии для получения подробной информации:"
+    )
+    await callback.message.edit_text(text, reply_markup=get_services_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("svc_"))
+async def cb_service_detail(callback: CallbackQuery) -> None:
+    """Show single service description and price."""
+    svc_key = callback.data.replace("svc_", "")
+    service = SERVICES_DATA.get(svc_key)
+
+    if not service:
+        await callback.answer("Услуга не найдена", show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        service["description"],
+        reply_markup=get_service_detail_keyboard(svc_key),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_doctors")
+async def cb_doctors_menu(callback: CallbackQuery) -> None:
+    """Show clinic doctors and specializations."""
+    await callback.message.edit_text(
+        DOCTORS_TEXT,
+        reply_markup=get_doctors_keyboard(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "menu_location")
+async def cb_location_menu(callback: CallbackQuery) -> None:
+    """Send location details and native Telegram map pin."""
+    location_text = (
+        f"📍 <b>Локация и контакты — {CLINIC_NAME}</b>\n\n"
+        f"🏢 <b>Адрес:</b> {CLINIC_ADDRESS}\n"
+        f"🕒 <b>Режим работы:</b> {CLINIC_SCHEDULE}\n"
+        f"📞 <b>Единый телефон:</b> <code>{CLINIC_PHONE}</code>\n\n"
+        f"<i>Ниже мы отправили геолокацию на карте, чтобы вам было удобно построить маршрут.</i>"
+    )
+    await callback.message.edit_text(location_text, reply_markup=get_location_keyboard())
+
+    # Send native location coordinates
+    try:
+        await callback.message.answer_location(
+            latitude=CLINIC_LATITUDE,
+            longitude=CLINIC_LONGITUDE,
+        )
+    except Exception as exc:
+        logger.warning("Could not send location coordinates: %s", exc)
+
+    await callback.answer()
+
+
+# ---------------------------------------------------------------------------
+# FSM Lead Intake Flow (Booking)
+# ---------------------------------------------------------------------------
+@dp.callback_query(F.data == "booking_cancel")
+@dp.message(Command("cancel"))
+@dp.message(F.text.casefold() == "отмена")
+@dp.message(F.text.casefold() == "❌ отменить запись")
+async def cancel_booking(event: Message | CallbackQuery, state: FSMContext) -> None:
+    """Cancel booking flow at any step."""
+    current_state = await state.get_state()
+    await state.clear()
+
+    cancel_msg = (
+        "❌ <b>Запись на прием отменена.</b>\n\n"
+        "Вы всегда можете вернуться в главное меню и начать заново, "
+        "когда вам будет удобно."
+    )
+
+    if isinstance(event, CallbackQuery):
+        await event.message.answer(
+            cancel_msg,
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await event.message.answer(
+            "Главное меню:", reply_markup=get_main_menu_keyboard()
+        )
+        await event.answer()
+    else:
+        await event.answer(
+            cancel_msg,
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await event.answer(
+            "Главное меню:", reply_markup=get_main_menu_keyboard()
+        )
+
+
+@dp.callback_query(F.data == "book_start")
+async def start_booking_generic(callback: CallbackQuery, state: FSMContext) -> None:
+    """Initiate booking without preselected service (Step 1)."""
+    await state.set_state(BookingState.service)
+    text = (
+        "📝 <b>Запись на прием в Dr. Shoxruz XDENT</b>\n\n"
+        "<b>Шаг 1 из 5:</b> Какая услуга или проблема вас беспокоит?\n"
+        "<i>(Например: острая зубная боль, чистка зубов, консультация по брекетам, имплантация)</i>"
+    )
+    await callback.message.answer(text, reply_markup=get_cancel_inline_keyboard())
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("book_with_svc_"))
+async def start_booking_with_service(callback: CallbackQuery, state: FSMContext) -> None:
+    """Initiate booking with pre-selected service (Skips to Step 2)."""
+    svc_key = callback.data.replace("book_with_svc_", "")
+    svc_title = SERVICES_DATA.get(svc_key, {}).get("title", "Стоматологическая услуга")
+
+    await state.update_data(service=svc_title)
+    await state.set_state(BookingState.full_name)
+
+    text = (
+        f"📝 <b>Запись на прием:</b> <i>{html.escape(svc_title)}</i>\n\n"
+        "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
+        "Это необходимо для предварительной регистрации в базе пациентов."
+    )
+    await callback.message.answer(text, reply_markup=get_cancel_inline_keyboard())
+    await callback.answer()
+
+
+@dp.message(BookingState.service)
+async def process_service(message: Message, state: FSMContext) -> None:
+    """Process custom service/problem text (Step 1 -> Step 2)."""
+    service_text = message.text.strip() if message.text else ""
+    if len(service_text) < 2:
+        await message.answer(
+            "Пожалуйста, кратко опишите проблему или желаемую услугу:",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        return
+
+    await state.update_data(service=service_text)
+    await state.set_state(BookingState.full_name)
+
+    text = (
+        "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
+        "Это необходимо для предварительного оформления медицинской карты."
+    )
+    await message.answer(text, reply_markup=get_cancel_inline_keyboard())
+
+
+@dp.message(BookingState.full_name)
+async def process_full_name(message: Message, state: FSMContext) -> None:
+    """Process patient full name (Step 2 -> Step 3)."""
+    name_text = message.text.strip() if message.text else ""
+    if len(name_text) < 3 or any(char.isdigit() for char in name_text):
+        await message.answer(
+            "⚠️ Пожалуйста, введите корректные имя и фамилию (без цифр, например: <i>Каримов Тимур</i>):",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        return
+
+    await state.update_data(full_name=name_text)
+    await state.set_state(BookingState.birth_year)
+
+    text = (
+        f"Принято, <b>{html.escape(name_text)}</b>!\n\n"
+        "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (4 цифры, например: <code>1992</code>).\n\n"
+        "<i>Год рождения необходим для точного заведения амбулаторной карты.</i>"
+    )
+    await message.answer(text, reply_markup=get_cancel_inline_keyboard())
+
+
+@dp.message(BookingState.birth_year)
+async def process_birth_year(message: Message, state: FSMContext) -> None:
+    """Process patient birth year with validation (Step 3 -> Step 4)."""
+    year_text = message.text.strip() if message.text else ""
+    current_year = datetime.now(TASHKENT_TZ).year
+
+    if not year_text.isdigit() or not (1920 <= int(year_text) <= current_year):
+        await message.answer(
+            f"⚠️ Пожалуйста, введите корректный год рождения (от 1920 до {current_year}):",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        return
+
+    await state.update_data(birth_year=year_text)
+    await state.set_state(BookingState.address)
+
+    text = (
+        "<b>Шаг 4 из 5:</b> Укажите ваш <b>район или адрес проживания</b>\n"
+        "<i>(например: Мирзо-Улугбекский район, ориентир: БИЙ)</i>.\n\n"
+        "Информация фиксируется в карточке пациента клиники."
+    )
+    await message.answer(text, reply_markup=get_cancel_inline_keyboard())
+
+
+@dp.message(BookingState.address)
+async def process_address(message: Message, state: FSMContext) -> None:
+    """Process patient address/district (Step 4 -> Step 5)."""
+    address_text = message.text.strip() if message.text else ""
+    if len(address_text) < 3:
+        await message.answer(
+            "⚠️ Пожалуйста, укажите ваш район или ориентир (не менее 3 символов):",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        return
+
+    await state.update_data(address=address_text)
+    await state.set_state(BookingState.phone)
+
+    text = (
+        "<b>Шаг 5 из 5:</b> Отправьте ваш <b>контактный номер телефона</b>.\n\n"
+        "Вы можете нажать на кнопку ниже <b>«📱 Поделиться контактом»</b> "
+        "или ввести номер вручную (например: <code>+998901234567</code>):"
+    )
+    await message.answer(text, reply_markup=get_contact_reply_keyboard())
+
+
+@dp.message(BookingState.phone, F.contact)
+@dp.message(BookingState.phone, F.text)
+async def process_phone_and_finalize(message: Message, state: FSMContext) -> None:
+    """Process phone number, finalize lead, and alert clinic admins."""
+    # Extract phone from contact or typed text
+    if message.contact:
+        phone_number = message.contact.phone_number
+        if not phone_number.startswith("+"):
+            phone_number = f"+{phone_number}"
+    else:
+        phone_raw = message.text.strip()
+        # Basic validation: must contain at least 7 digits
+        digits_only = "".join(filter(str.isdigit, phone_raw))
+        if len(digits_only) < 7:
+            await message.answer(
+                "⚠️ Пожалуйста, введите корректный номер телефона (например: <code>+998901234567</code>) "
+                "или нажмите кнопку «📱 Поделиться контактом»:",
+                reply_markup=get_contact_reply_keyboard(),
+            )
+            return
+        phone_number = phone_raw
+
+    # Collect all lead data
+    data = await state.get_data()
+    await state.clear()
+
+    full_name = data.get("full_name", "Не указано")
+    birth_year = data.get("birth_year", "Не указано")
+    address = data.get("address", "Не указано")
+    service = data.get("service", "Не указано")
+    timestamp = datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M:%S")
+
+    # Format user reference
+    user_id = message.from_user.id
+    if message.from_user.username:
+        user_display = f"@{message.from_user.username}"
+    else:
+        user_display = f'<a href="tg://user?id={user_id}">{html.escape(full_name)}</a>'
+
+    # Admin lead notification
+    admin_lead_text = (
+        "🦷 <b>НОВАЯ ЗАПИСЬ НА ПРИЕМ (XDENT)</b>\n\n"
+        f"👤 <b>Пациент:</b> {html.escape(full_name)} ({user_display})\n"
+        f"📅 <b>Год рождения:</b> {html.escape(birth_year)}\n"
+        f"📍 <b>Адрес:</b> {html.escape(address)}\n"
+        f"🛠 <b>Услуга:</b> {html.escape(service)}\n"
+        f"📞 <b>Телефон:</b> <code>{html.escape(phone_number)}</code>\n"
+        f"⏱ <b>Время заявки:</b> {timestamp} (Ташкент)"
+    )
+
+    # Dispatch to ADMIN_CHAT_ID if configured
+    if ADMIN_CHAT_ID and ADMIN_CHAT_ID != "YOUR_ADMIN_CHAT_ID_HERE":
+        try:
+            await bot.send_message(
+                chat_id=ADMIN_CHAT_ID,
+                text=admin_lead_text,
+            )
+            logger.info("Successfully dispatched lead to admin chat: %s", ADMIN_CHAT_ID)
+        except Exception as exc:
+            logger.error("Failed to send lead to admin chat %s: %s", ADMIN_CHAT_ID, exc)
+    else:
+        logger.warning("ADMIN_CHAT_ID is not configured. Lead output:\n%s", admin_lead_text)
+
+    # User confirmation message
+    user_confirm_text = (
+        f"✅ <b>Спасибо, {html.escape(full_name)}! Ваша запись принята.</b>\n\n"
+        f"📋 <b>Детали вашей заявки:</b>\n"
+        f"• <b>Услуга:</b> {html.escape(service)}\n"
+        f"• <b>Год рождения:</b> {html.escape(birth_year)}\n"
+        f"• <b>Район:</b> {html.escape(address)}\n"
+        f"• <b>Контактный телефон:</b> {html.escape(phone_number)}\n\n"
+        f"📞 Координатор клиники <b>{CLINIC_NAME}</b> свяжется с вами "
+        f"в ближайшее время для подтверждения и подбора удобного времени визита.\n\n"
+        f"<i>При возникновении срочных вопросов звоните нам 24/7:</i> <code>{CLINIC_PHONE}</code>"
+    )
+
+    await message.answer(
+        user_confirm_text,
+        reply_markup=ReplyKeyboardRemove(),
+    )
+    await message.answer(
+        "Вы можете ознакомиться с другими разделами клиники:",
+        reply_markup=get_main_menu_keyboard(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Application Entrypoint
+# ---------------------------------------------------------------------------
+async def main() -> None:
+    """Start polling."""
+    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
+        logger.warning(
+            "⚠️ ВНИМАНИЕ: BOT_TOKEN не установлен! Задайте BOT_TOKEN в файле .env или переменных окружения."
+        )
+
+    logger.info("Starting %s Telegram Bot...", CLINIC_NAME)
+
+    # Delete webhook if previously set to ensure polling works smoothly
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+    except Exception as exc:
+        logger.warning("Webhook cleanup warning: %s", exc)
+
+    # Start polling
+    await dp.start_polling(bot)
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot stopped.")
