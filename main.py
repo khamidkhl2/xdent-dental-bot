@@ -566,15 +566,11 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
             f"Вы авторизованы как <b>Управляющий / Администратор</b> (ID: <code>{user_id}</code>).\n\n"
             f"✅ Уведомления о новых пациентах: <b>АКТИВНЫ</b>\n"
             f"Все новые записи пациентов автоматически поступают в этот чат с деталями, контактами и адресом.\n\n"
-            f"Используйте кнопки меню внизу экрана или в сообщении:"
+            f"Для управления заявками и разделами клиники используйте меню внизу экрана 👇"
         )
         await message.answer(
             greeting,
             reply_markup=get_bottom_reply_keyboard(is_admin_user=True),
-        )
-        await message.answer(
-            "Быстрые действия панели администратора:",
-            reply_markup=get_admin_panel_keyboard(),
         )
         return
 
@@ -585,15 +581,11 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         f"Добро пожаловать в цифровую приемную клиники <b>{CLINIC_NAME}</b> 🦷\n\n"
         f"Мы предоставляем полный спектр премиальной стоматологической помощи "
         f"в Ташкенте с использованием передового европейского оборудования.\n\n"
-        f"Выберите интересующий вас раздел в меню ниже или воспользуйтесь кнопками прямо под клавиатурой 👇"
+        f"Воспользуйтесь кнопками меню прямо под клавиатурой 👇"
     )
     await message.answer(
         greeting,
         reply_markup=get_bottom_reply_keyboard(is_admin_user=False),
-    )
-    await message.answer(
-        "Навигация по разделам клиники:",
-        reply_markup=get_main_menu_keyboard(is_admin_user=False),
     )
 
 
@@ -656,10 +648,7 @@ async def msg_location(message: Message, state: FSMContext) -> None:
 async def msg_about(message: Message, state: FSMContext) -> None:
     """Handle bottom keyboard 'О клинике'."""
     await state.clear()
-    await message.answer(
-        ABOUT_CLINIC_TEXT,
-        reply_markup=get_main_menu_keyboard(is_admin_user=is_manager(message.from_user.id)),
-    )
+    await message.answer(ABOUT_CLINIC_TEXT)
 
 
 @dp.message(F.text == "👨‍💼 Панель администратора")
@@ -1330,10 +1319,6 @@ async def process_phone_and_finalize(message: Message, state: FSMContext, bot: B
     await message.answer(
         user_confirm_text,
         reply_markup=get_bottom_reply_keyboard(is_admin_user=is_manager(user_id)),
-    )
-    await message.answer(
-        "Вы можете воспользоваться разделами клиники в меню ниже:",
-        reply_markup=get_main_menu_keyboard(is_admin_user=is_manager(user_id)),
     )
 
 
