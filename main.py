@@ -50,18 +50,30 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID", "").strip()
 
-# Administrator / Manager IDs (Hardcoded fallback + environment variable)
+# Administrator / Manager IDs (Hardcoded fallback + environment variables)
 ADMIN_IDS: set[int] = {5831301324}
-if ADMIN_CHAT_ID:
-    try:
-        ADMIN_IDS.add(int(ADMIN_CHAT_ID))
-    except ValueError:
-        pass
+for env_var in ("ADMIN_CHAT_ID", "ADMIN_IDS", "MANAGER_IDS"):
+    val = os.getenv(env_var, "").strip()
+    if val:
+        for part in val.replace(";", ",").replace(" ", ",").split(","):
+            part = part.strip()
+            if part.lstrip("-").isdigit():
+                ADMIN_IDS.add(int(part))
 
 
 def is_manager(user_id: int) -> bool:
     """Check if the Telegram user ID belongs to a clinic manager/admin."""
     return user_id in ADMIN_IDS
+
+
+def get_approx_age(birth_year_str: str) -> Optional[int]:
+    """Calculate approximate patient age."""
+    if birth_year_str and birth_year_str.isdigit():
+        current_year = datetime.now(TASHKENT_TZ).year
+        age = current_year - int(birth_year_str)
+        if 0 <= age <= 120:
+            return age
+    return None
 
 
 # In-memory store of recent leads for manager inspection
@@ -184,11 +196,14 @@ ABOUT_CLINIC_TEXT = (
 # FSM States
 # ---------------------------------------------------------------------------
 class BookingState(StatesGroup):
-    service = State()     # Selected or typed service/problem
-    full_name = State()   # Patient's Full Name (ФИО)
-    birth_year = State()  # Year of birth (Год рождения)
-    address = State()     # District or home address
-    phone = State()       # Phone number (contact or text)
+    doctor = State()           # Selected doctor or None (General intake)
+    service = State()          # Selected or typed service/problem
+    full_name = State()        # Patient's Full Name (ФИО)
+    birth_year = State()       # Year of birth (Год рождения)
+    address = State()          # District or home address
+    preferred_date = State()   # Preferred visit date (Желаемая дата визита)
+    preferred_time = State()   # Preferred visit time (Желаемое время визита)
+    phone = State()            # Phone number (contact or text)
 
 
 # ---------------------------------------------------------------------------
@@ -308,12 +323,36 @@ def get_service_detail_keyboard(service_key: str) -> InlineKeyboardMarkup:
 
 
 def get_doctors_keyboard() -> InlineKeyboardMarkup:
-    """Doctors screen keyboard."""
+    """Doctors screen keyboard with options to book with specific specialists."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="📝 Записаться к врачу", callback_data="book_start"
+                    text="👑 Записаться к Др. Шохрузу (Главврач)",
+                    callback_data="book_doc_shoxruz",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💎 Записаться к Др. Нигоре (Терапевт)",
+                    callback_data="book_doc_nigora",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📐 Записаться к Др. Сардору (Ортодонт)",
+                    callback_data="book_doc_sardor",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🧸 Записаться к Др. Мадине (Детский)",
+                    callback_data="book_doc_madina",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📝 Записаться на общий прием", callback_data="book_start"
                 )
             ],
         ]
@@ -321,13 +360,29 @@ def get_doctors_keyboard() -> InlineKeyboardMarkup:
 
 
 def get_location_keyboard() -> InlineKeyboardMarkup:
-    """Location screen keyboard."""
+    """Location screen keyboard with direct maps and phone links."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="📝 Записаться на прием", callback_data="book_start"
                 )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🗺 Яндекс.Карты (Маршрут)",
+                    url="https://yandex.uz/maps/?pt=69.3297,41.3275&z=16&l=map",
+                ),
+                InlineKeyboardButton(
+                    text="🗺 2GIS",
+                    url="https://2gis.uz/tashkent/search/XDENT",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📞 Позвонить в клинику 24/7",
+                    url="tel:+998951111161",
+                ),
             ],
         ]
     )
@@ -545,6 +600,97 @@ def get_contact_reply_keyboard() -> ReplyKeyboardMarkup:
         ],
         resize_keyboard=True,
         one_time_keyboard=True,
+    )
+
+
+def get_date_choice_keyboard() -> InlineKeyboardMarkup:
+    """Dynamic calendar buttons for preferred appointment date in Tashkent."""
+    now = datetime.now(TASHKENT_TZ)
+    ru_weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    ru_months = [
+        "", "янв", "фев", "мар", "апр", "май", "июн",
+        "июл", "авг", "сен", "окт", "ноя", "дек"
+    ]
+
+    tomorrow = now + timedelta(days=1)
+    day2 = now + timedelta(days=2)
+    day3 = now + timedelta(days=3)
+    day4 = now + timedelta(days=4)
+    day5 = now + timedelta(days=5)
+
+    today_label = f"Сегодня ({now.day} {ru_months[now.month]}, {ru_weekdays[now.weekday()]})"
+    tomorrow_label = f"Завтра ({tomorrow.day} {ru_months[tomorrow.month]}, {ru_weekdays[tomorrow.weekday()]})"
+    day2_label = f"{day2.day} {ru_months[day2.month]} ({ru_weekdays[day2.weekday()]})"
+    day3_label = f"{day3.day} {ru_months[day3.month]} ({ru_weekdays[day3.weekday()]})"
+    day4_label = f"{day4.day} {ru_months[day4.month]} ({ru_weekdays[day4.weekday()]})"
+    day5_label = f"{day5.day} {ru_months[day5.month]} ({ru_weekdays[day5.weekday()]})"
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔥 Как можно скорее (Срочно / Острая боль)",
+                    callback_data="pick_date_urgent",
+                )
+            ],
+            [
+                InlineKeyboardButton(text=f"📍 {today_label}", callback_data=f"pick_date_{today_label}"),
+                InlineKeyboardButton(text=f"🗓 {tomorrow_label}", callback_data=f"pick_date_{tomorrow_label}"),
+            ],
+            [
+                InlineKeyboardButton(text=day2_label, callback_data=f"pick_date_{day2_label}"),
+                InlineKeyboardButton(text=day3_label, callback_data=f"pick_date_{day3_label}"),
+            ],
+            [
+                InlineKeyboardButton(text=day4_label, callback_data=f"pick_date_{day4_label}"),
+                InlineKeyboardButton(text=day5_label, callback_data=f"pick_date_{day5_label}"),
+            ],
+            [
+                InlineKeyboardButton(text="✍️ Другая дата (ввести текстом)", callback_data="pick_date_custom"),
+            ],
+            [
+                InlineKeyboardButton(text="❌ Отменить запись", callback_data="booking_cancel"),
+            ],
+        ]
+    )
+
+
+def get_time_choice_keyboard() -> InlineKeyboardMarkup:
+    """Time slot buttons for preferred appointment time."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🌅 Утро (09:00 – 12:00)", callback_data="pick_time_Утро (09:00 - 12:00)"
+                ),
+                InlineKeyboardButton(
+                    text="☀️ День (12:00 – 15:00)", callback_data="pick_time_День (12:00 - 15:00)"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🌇 Вечер (15:00 – 18:00)", callback_data="pick_time_Вечер (15:00 - 18:00)"
+                ),
+                InlineKeyboardButton(
+                    text="🌙 Поздний вечер (18:00 – 21:00)", callback_data="pick_time_Поздний вечер (18:00 - 21:00)"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⏰ В любое удобное время", callback_data="pick_time_Любое время"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✍️ Точное время (ввести текстом)", callback_data="pick_time_custom"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отменить запись", callback_data="booking_cancel"
+                ),
+            ],
+        ]
     )
 
 
@@ -811,12 +957,24 @@ async def cb_admin_test_lead(callback: CallbackQuery) -> None:
 
     lead_id = len(RECENT_LEADS) + 1
     timestamp = datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M:%S")
+    now = datetime.now(TASHKENT_TZ)
+    tomorrow = now + timedelta(days=1)
+    ru_months = ["", "янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+
+    preferred_date = f"Завтра ({tomorrow.day} {ru_months[tomorrow.month]})"
+    preferred_time = "День (12:00 – 15:00)"
+    doctor_name = "👑 Др. Шохруз (Главврач / Хирург-имплантолог)"
+
     test_lead = {
         "id": lead_id,
+        "user_id": callback.from_user.id,  # Point to manager so manager can test patient ticket!
         "full_name": "Каримов Тимур (Тестовый пациент)",
         "birth_year": "1994",
-        "address": "Мирзо-Улугбекский р-н, ул. БИЙ",
+        "address": "Мирзо-Улугбекский р-н (ул. БИЙ)",
         "service": "Первичная консультация и диагностика",
+        "doctor": doctor_name,
+        "preferred_date": preferred_date,
+        "preferred_time": preferred_time,
         "phone": "+998901234567",
         "timestamp": timestamp,
         "username": "test_patient",
@@ -825,14 +983,21 @@ async def cb_admin_test_lead(callback: CallbackQuery) -> None:
     }
     RECENT_LEADS.append(test_lead)
 
+    age = get_approx_age("1994")
+    age_suffix = f" (~{age} лет)" if age is not None else ""
+
     test_lead_text = (
-        "🦷 <b>НОВАЯ ЗАПИСЬ НА ПРИЕМ (XDENT) — ТЕСТ</b>\n\n"
-        f"👤 <b>Пациент:</b> Каримов Тимур (Тестовый пациент) (@test_patient)\n"
-        f"📅 <b>Год рождения:</b> 1994\n"
-        f"📍 <b>Адрес:</b> Мирзо-Улугбекский р-н, ул. БИЙ\n"
+        "🦷 <b>НОВАЯ ЗАПИСЬ НА ПРИЕМ (XDENT) — ТЕСТ</b>\n"
+        f"🎫 <b>Талон:</b> <code>#XD-{lead_id:04d}</code>\n\n"
+        f"📅 <b>ЖЕЛАЕМАЯ ДАТА И ВРЕМЯ:</b>\n"
+        f"👉 <b><u>{preferred_date} • {preferred_time}</u></b> ⚡\n\n"
         f"🛠 <b>Услуга:</b> Первичная консультация и диагностика\n"
-        f"📞 <b>Телефон:</b> <code>+998901234567</code>\n"
-        f"⏱ <b>Время заявки:</b> {timestamp} (Ташкент)\n"
+        f"👨‍⚕️ <b>Врач:</b> {doctor_name}\n"
+        f"👤 <b>Пациент:</b> Каримов Тимур (@test_patient)\n"
+        f"🎂 <b>Год рождения:</b> 1994{age_suffix}\n"
+        f"📍 <b>Адрес:</b> Мирзо-Улугбекский р-н (ул. БИЙ)\n"
+        f"📞 <b>Телефон:</b> <code>+998901234567</code>\n\n"
+        f"⏱ <b>Время подачи:</b> {timestamp} (Ташкент)\n"
         f"📌 <b>Статус:</b> 🟡 Новая"
     )
 
@@ -873,8 +1038,8 @@ async def cb_lead_take(callback: CallbackQuery) -> None:
 
 
 @dp.callback_query(F.data.startswith("lead_confirm_"))
-async def cb_lead_confirm(callback: CallbackQuery) -> None:
-    """Manager confirms appointment with patient."""
+async def cb_lead_confirm(callback: CallbackQuery, bot: Bot) -> None:
+    """Manager confirms appointment with patient and triggers patient ticket."""
     if not is_manager(callback.from_user.id):
         await callback.answer("⛔ Доступ ограничен", show_alert=True)
         return
@@ -882,10 +1047,12 @@ async def cb_lead_confirm(callback: CallbackQuery) -> None:
     lead_id = int(callback.data.replace("lead_confirm_", ""))
     manager_name = html.escape(callback.from_user.first_name or "Менеджер")
 
+    matched_lead = None
     for l in RECENT_LEADS:
         if l["id"] == lead_id:
             l["status"] = f"🟢 Подтверждено ({manager_name})"
             l["status_key"] = "confirmed"
+            matched_lead = l
             break
 
     current_text = callback.message.html_text or callback.message.text
@@ -896,6 +1063,30 @@ async def cb_lead_confirm(callback: CallbackQuery) -> None:
 
     await callback.message.edit_text(new_text, reply_markup=None)
     await callback.answer("🎉 Запись подтверждена!")
+
+    # Two-way instant confirmation to patient
+    if matched_lead and matched_lead.get("user_id"):
+        patient_uid = matched_lead["user_id"]
+        try:
+            doc_line = ""
+            if matched_lead.get("doctor") and matched_lead.get("doctor") != "Любой свободный врач":
+                doc_line = f"• <b>Специалист:</b> {html.escape(matched_lead['doctor'])}\n"
+
+            patient_ticket = (
+                f"🎉 <b>Ваша запись в {CLINIC_NAME} подтверждена!</b>\n\n"
+                f"Здравствуйте, <b>{html.escape(matched_lead['full_name'])}</b>!\n"
+                f"Администрация клиники подтвердила ваше время приема:\n\n"
+                f"• <b>Дата и время:</b> <b>{html.escape(matched_lead.get('preferred_date', 'Согласовано'))} • {html.escape(matched_lead.get('preferred_time', ''))}</b>\n"
+                f"• <b>Услуга:</b> {html.escape(matched_lead.get('service', 'Консультация'))}\n"
+                f"{doc_line}"
+                f"• <b>Адрес:</b> {CLINIC_ADDRESS}\n\n"
+                f"✨ <i>Кабинет и оборудование забронированы специально для вас. Будем признательны, если вы подойдете за 5-10 минут до начала визита.</i>\n\n"
+                f"📞 Вопросы и перенос времени: <code>{CLINIC_PHONE}</code>"
+            )
+            await bot.send_message(chat_id=patient_uid, text=patient_ticket)
+            logger.info("Sent appointment confirmation ticket to patient %s", patient_uid)
+        except Exception as exc:
+            logger.warning("Could not dispatch confirmation to patient %s: %s", patient_uid, exc)
 
 
 @dp.callback_query(F.data.startswith("lead_reject_"))
@@ -1042,13 +1233,38 @@ async def cancel_booking(event: Union[Message, CallbackQuery], state: FSMContext
         await event.answer(cancel_msg, reply_markup=reply_kb)
 
 
+DOCTORS_MAP = {
+    "shoxruz": "👑 Др. Шохруз (Главврач / Хирург-имплантолог)",
+    "nigora": "💎 Др. Нигора (Терапевт / Эстетика)",
+    "sardor": "📐 Др. Сардор (Ортодонт / Брекеты)",
+    "madina": "🧸 Др. Мадина (Детский стоматолог)",
+}
+
+
+@dp.callback_query(F.data.startswith("book_doc_"))
+async def start_booking_with_doctor(callback: CallbackQuery, state: FSMContext) -> None:
+    """Initiate booking for a specific specialist."""
+    doc_key = callback.data.replace("book_doc_", "")
+    doc_name = DOCTORS_MAP.get(doc_key, "Ведущий специалист XDENT")
+    await state.update_data(doctor=doc_name)
+    await state.set_state(BookingState.service)
+
+    text = (
+        f"👨‍⚕️ <b>Выбран специалист:</b> <i>{html.escape(doc_name)}</i>\n\n"
+        "<b>Шаг 1 из 6:</b> Выберите услугу или проблему из списка ниже "
+        "(или опишите вашу ситуацию своими словами):"
+    )
+    await callback.message.answer(text, reply_markup=get_services_choice_keyboard())
+    await callback.answer()
+
+
 @dp.callback_query(F.data == "book_start")
 async def start_booking_generic(callback: CallbackQuery, state: FSMContext) -> None:
     """Initiate booking without preselected service (Step 1)."""
     await state.set_state(BookingState.service)
     text = (
         "📝 <b>Запись на прием в Dr. Shoxruz XDENT</b>\n\n"
-        "<b>Шаг 1 из 5:</b> Выберите услугу или проблему из списка ниже "
+        "<b>Шаг 1 из 6:</b> Выберите услугу или проблему из списка ниже "
         "(или опишите вашу ситуацию своими словами):"
     )
     await callback.message.answer(text, reply_markup=get_services_choice_keyboard())
@@ -1074,7 +1290,7 @@ async def cb_pick_service(callback: CallbackQuery, state: FSMContext) -> None:
     first_name = callback.from_user.first_name
     text = (
         f"📝 <b>Выбрано:</b> <i>{html.escape(svc_title)}</i>\n\n"
-        "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
+        "<b>Шаг 2 из 6:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
         "Вы можете нажать кнопку ниже, чтобы использовать имя вашего профиля, "
         "или ввести ФИО вручную:"
     )
@@ -1094,7 +1310,7 @@ async def start_booking_with_service(callback: CallbackQuery, state: FSMContext)
     first_name = callback.from_user.first_name
     text = (
         f"📝 <b>Запись на прием:</b> <i>{html.escape(svc_title)}</i>\n\n"
-        "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
+        "<b>Шаг 2 из 6:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
         "Вы можете нажать кнопку ниже, чтобы использовать имя вашего профиля, "
         "или ввести ФИО вручную:"
     )
@@ -1119,7 +1335,7 @@ async def process_service(message: Message, state: FSMContext) -> None:
     first_name = message.from_user.first_name
     text = (
         f"📝 <b>Выбрано:</b> <i>{html.escape(service_text)}</i>\n\n"
-        "<b>Шаг 2 из 5:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
+        "<b>Шаг 2 из 6:</b> Укажите ваше <b>ФИО</b> (например: <i>Каримов Тимур</i>).\n\n"
         "Вы можете нажать кнопку ниже, чтобы использовать имя вашего профиля, "
         "или ввести ФИО вручную:"
     )
@@ -1135,7 +1351,7 @@ async def cb_pick_name(callback: CallbackQuery, state: FSMContext) -> None:
 
     text = (
         f"Принято, <b>{html.escape(name_val)}</b>!\n\n"
-        "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
+        "<b>Шаг 3 из 6:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
         "Выберите период ниже или введите год сообщением (например: <code>1995</code>):"
     )
     await callback.message.edit_text(text, reply_markup=get_decade_choice_keyboard())
@@ -1159,7 +1375,7 @@ async def process_full_name(message: Message, state: FSMContext) -> None:
 
     text = (
         f"Принято, <b>{html.escape(name_text)}</b>!\n\n"
-        "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
+        "<b>Шаг 3 из 6:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
         "Выберите период ниже или введите год сообщением (например: <code>1995</code>):"
     )
     await message.answer(text, reply_markup=get_decade_choice_keyboard())
@@ -1171,7 +1387,7 @@ async def cb_decade_select(callback: CallbackQuery, state: FSMContext) -> None:
     decade_key = callback.data.replace("decade_", "")
     if decade_key == "back":
         await callback.message.edit_text(
-            "<b>Шаг 3 из 5:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
+            "<b>Шаг 3 из 6:</b> Укажите ваш <b>год рождения</b> (необходимо для амбулаторной карты).\n\n"
             "Выберите период ниже или введите год сообщением (например: <code>1995</code>):",
             reply_markup=get_decade_choice_keyboard(),
         )
@@ -1212,7 +1428,7 @@ async def cb_pick_year(callback: CallbackQuery, state: FSMContext) -> None:
 
     text = (
         f"📅 Год рождения: <b>{year_val}</b>\n\n"
-        "<b>Шаг 4 из 5:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
+        "<b>Шаг 4 из 6:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
         "<i>(Или введите точный адрес/ориентир текстом)</i>"
     )
     await callback.message.edit_text(text, reply_markup=get_districts_keyboard())
@@ -1237,7 +1453,7 @@ async def process_birth_year(message: Message, state: FSMContext) -> None:
 
     text = (
         f"📅 Год рождения: <b>{year_text}</b>\n\n"
-        "<b>Шаг 4 из 5:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
+        "<b>Шаг 4 из 6:</b> Выберите ваш <b>район проживания в Ташкенте</b>:\n\n"
         "<i>(Или введите точный адрес/ориентир текстом)</i>"
     )
     await message.answer(text, reply_markup=get_districts_keyboard())
@@ -1245,24 +1461,23 @@ async def process_birth_year(message: Message, state: FSMContext) -> None:
 
 @dp.callback_query(BookingState.address, F.data.startswith("pick_dist_"))
 async def cb_pick_district(callback: CallbackQuery, state: FSMContext) -> None:
-    """Handle 1-tap district selection on Step 4."""
+    """Handle 1-tap district selection on Step 4 -> advance to Step 5 (Date)."""
     dist_val = callback.data.replace("pick_dist_", "")
     await state.update_data(address=dist_val)
-    await state.set_state(BookingState.phone)
+    await state.set_state(BookingState.preferred_date)
 
     text = (
         f"📍 <b>Район:</b> {html.escape(dist_val)}\n\n"
-        "<b>Шаг 5 из 5:</b> Отправьте ваш <b>контактный номер телефона</b>.\n\n"
-        "Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана "
-        "или введите номер вручную (например: <code>+998901234567</code>):"
+        "<b>Шаг 5 из 6:</b> Выберите <b>желаемую дату визита</b> в клинику:\n\n"
+        "<i>(Выберите день на кнопках ниже или введите дату сообщением)</i>"
     )
-    await callback.message.answer(text, reply_markup=get_contact_reply_keyboard())
+    await callback.message.edit_text(text, reply_markup=get_date_choice_keyboard())
     await callback.answer()
 
 
 @dp.message(BookingState.address)
 async def process_address(message: Message, state: FSMContext) -> None:
-    """Process patient address/district (Step 4 -> Step 5)."""
+    """Process patient address/district (Step 4 -> Step 5 Date)."""
     address_text = message.text.strip() if message.text else ""
     if len(address_text) < 3:
         await message.answer(
@@ -1272,10 +1487,108 @@ async def process_address(message: Message, state: FSMContext) -> None:
         return
 
     await state.update_data(address=address_text)
+    await state.set_state(BookingState.preferred_date)
+
+    text = (
+        f"📍 <b>Адрес/ориентир:</b> {html.escape(address_text)}\n\n"
+        "<b>Шаг 5 из 6:</b> Выберите <b>желаемую дату визита</b> в клинику:\n\n"
+        "<i>(Выберите день на кнопках ниже или введите дату сообщением)</i>"
+    )
+    await message.answer(text, reply_markup=get_date_choice_keyboard())
+
+
+@dp.callback_query(BookingState.preferred_date, F.data.startswith("pick_date_"))
+async def cb_pick_date(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle preferred date selection (Step 5 -> Step 6 Time)."""
+    date_val = callback.data.replace("pick_date_", "")
+    if date_val == "custom":
+        await callback.message.answer(
+            "Пожалуйста, напишите желаемую дату визита текстом (например: <i>28 сентября</i> или <i>в субботу</i>):",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        await callback.answer()
+        return
+    elif date_val == "urgent":
+        date_str = "🔥 Как можно скорее (Срочно / Острая боль)"
+    else:
+        date_str = date_val
+
+    await state.update_data(preferred_date=date_str)
+    await state.set_state(BookingState.preferred_time)
+
+    text = (
+        f"🗓 <b>Дата визита:</b> {html.escape(date_str)}\n\n"
+        "<b>Шаг 6 из 6:</b> Выберите <b>удобный интервал времени</b>:\n\n"
+        "<i>(Или укажите конкретное время текстом, например: 14:30)</i>"
+    )
+    await callback.message.edit_text(text, reply_markup=get_time_choice_keyboard())
+    await callback.answer()
+
+
+@dp.message(BookingState.preferred_date)
+async def process_preferred_date(message: Message, state: FSMContext) -> None:
+    """Process custom text date input (Step 5 -> Step 6 Time)."""
+    date_text = message.text.strip() if message.text else ""
+    if len(date_text) < 2:
+        await message.answer(
+            "Пожалуйста, выберите дату кнопкой или укажите желаемый день текстом:",
+            reply_markup=get_date_choice_keyboard(),
+        )
+        return
+
+    await state.update_data(preferred_date=date_text)
+    await state.set_state(BookingState.preferred_time)
+
+    text = (
+        f"🗓 <b>Дата визита:</b> {html.escape(date_text)}\n\n"
+        "<b>Шаг 6 из 6:</b> Выберите <b>удобный интервал времени</b>:\n\n"
+        "<i>(Или укажите конкретное время текстом, например: 14:30)</i>"
+    )
+    await message.answer(text, reply_markup=get_time_choice_keyboard())
+
+
+@dp.callback_query(BookingState.preferred_time, F.data.startswith("pick_time_"))
+async def cb_pick_time(callback: CallbackQuery, state: FSMContext) -> None:
+    """Handle preferred time selection (Step 6 -> Step 7 Phone)."""
+    time_val = callback.data.replace("pick_time_", "")
+    if time_val == "custom":
+        await callback.message.answer(
+            "Пожалуйста, напишите желаемое точное время сообщением (например: <i>11:30</i> или <i>после 17:00</i>):",
+            reply_markup=get_cancel_inline_keyboard(),
+        )
+        await callback.answer()
+        return
+
+    await state.update_data(preferred_time=time_val)
     await state.set_state(BookingState.phone)
 
     text = (
-        "<b>Шаг 5 из 5:</b> Отправьте ваш <b>контактный номер телефона</b>.\n\n"
+        f"⏰ <b>Время приема:</b> {html.escape(time_val)}\n\n"
+        "<b>Финальный шаг:</b> Отправьте ваш <b>контактный номер телефона</b>.\n\n"
+        "Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана "
+        "или введите номер вручную (например: <code>+998901234567</code>):"
+    )
+    await callback.message.answer(text, reply_markup=get_contact_reply_keyboard())
+    await callback.answer()
+
+
+@dp.message(BookingState.preferred_time)
+async def process_preferred_time(message: Message, state: FSMContext) -> None:
+    """Process custom text time input (Step 6 -> Step 7 Phone)."""
+    time_text = message.text.strip() if message.text else ""
+    if len(time_text) < 2:
+        await message.answer(
+            "Пожалуйста, выберите интервал кнопкой или укажите желаемое время текстом:",
+            reply_markup=get_time_choice_keyboard(),
+        )
+        return
+
+    await state.update_data(preferred_time=time_text)
+    await state.set_state(BookingState.phone)
+
+    text = (
+        f"⏰ <b>Время приема:</b> {html.escape(time_text)}\n\n"
+        "<b>Финальный шаг:</b> Отправьте ваш <b>контактный номер телефона</b>.\n\n"
         "Нажмите кнопку <b>«📱 Поделиться контактом»</b> внизу экрана "
         "или введите номер вручную (например: <code>+998901234567</code>):"
     )
@@ -1312,16 +1625,24 @@ async def process_phone_and_finalize(message: Message, state: FSMContext, bot: B
     birth_year = data.get("birth_year", "Не указано")
     address = data.get("address", "Не указано")
     service = data.get("service", "Не указано")
+    doctor = data.get("doctor", "Любой свободный врач")
+    preferred_date = data.get("preferred_date", "Как можно скорее")
+    preferred_time = data.get("preferred_time", "Любое удобное время")
     timestamp = datetime.now(TASHKENT_TZ).strftime("%d.%m.%Y %H:%M:%S")
 
     # Record lead in memory store
     lead_id = len(RECENT_LEADS) + 1
+    user_id = message.from_user.id
     lead_record = {
         "id": lead_id,
+        "user_id": user_id,
         "full_name": full_name,
         "birth_year": birth_year,
         "address": address,
         "service": service,
+        "doctor": doctor,
+        "preferred_date": preferred_date,
+        "preferred_time": preferred_time,
         "phone": phone_number,
         "timestamp": timestamp,
         "username": message.from_user.username,
@@ -1331,21 +1652,28 @@ async def process_phone_and_finalize(message: Message, state: FSMContext, bot: B
     RECENT_LEADS.append(lead_record)
 
     # Format user reference
-    user_id = message.from_user.id
     if message.from_user.username:
         user_display = f"@{message.from_user.username}"
     else:
         user_display = f'<a href="tg://user?id={user_id}">{html.escape(full_name)}</a>'
 
-    # Admin lead notification
+    age = get_approx_age(birth_year)
+    age_suffix = f" (~{age} лет)" if age is not None else ""
+    doctor_line = f"👨‍⚕️ <b>Врач:</b> {html.escape(doctor)}\n" if doctor and doctor != "Любой свободный врач" else ""
+
+    # Admin lead notification with highlighted appointment date & time
     admin_lead_text = (
-        "🦷 <b>НОВАЯ ЗАПИСЬ НА ПРИЕМ (XDENT)</b>\n\n"
-        f"👤 <b>Пациент:</b> {html.escape(full_name)} ({user_display})\n"
-        f"📅 <b>Год рождения:</b> {html.escape(birth_year)}\n"
-        f"📍 <b>Адрес:</b> {html.escape(address)}\n"
+        "🦷 <b>НОВАЯ ЗАПИСЬ НА ПРИЕМ (XDENT)</b>\n"
+        f"🎫 <b>Талон:</b> <code>#XD-{lead_id:04d}</code>\n\n"
+        f"📅 <b>ЖЕЛАЕМАЯ ДАТА И ВРЕМЯ:</b>\n"
+        f"👉 <b><u>{html.escape(preferred_date)} • {html.escape(preferred_time)}</u></b> ⚡\n\n"
         f"🛠 <b>Услуга:</b> {html.escape(service)}\n"
-        f"📞 <b>Телефон:</b> <code>{html.escape(phone_number)}</code>\n"
-        f"⏱ <b>Время заявки:</b> {timestamp} (Ташкент)\n"
+        f"{doctor_line}"
+        f"👤 <b>Пациент:</b> {html.escape(full_name)} ({user_display})\n"
+        f"🎂 <b>Год рождения:</b> {html.escape(birth_year)}{age_suffix}\n"
+        f"📍 <b>Район:</b> {html.escape(address)}\n"
+        f"📞 <b>Телефон:</b> <code>{html.escape(phone_number)}</code>\n\n"
+        f"⏱ <b>Время подачи:</b> {timestamp} (Ташкент)\n"
         f"📌 <b>Статус:</b> 🟡 Новая"
     )
 
@@ -1361,17 +1689,23 @@ async def process_phone_and_finalize(message: Message, state: FSMContext, bot: B
         except Exception as exc:
             logger.error("Failed to send lead to manager chat %s: %s", target_chat_id, exc)
 
-    # User confirmation message
+    # Patient VIP Electronic Visit Ticket
+    doc_display = f"• <b>Специалист:</b> {html.escape(doctor)}\n" if doctor and doctor != "Любой свободный врач" else ""
     user_confirm_text = (
         f"✅ <b>Спасибо, {html.escape(full_name)}! Ваша запись принята.</b>\n\n"
-        f"📋 <b>Детали вашей заявки:</b>\n"
+        f"🎫 <b>Электронный талон:</b> <code>#XD-{lead_id:04d}</code>\n\n"
+        f"📋 <b>Детали вашей записи:</b>\n"
+        f"• <b>Желаемая дата:</b> <b>{html.escape(preferred_date)}</b>\n"
+        f"• <b>Желаемое время:</b> <b>{html.escape(preferred_time)}</b>\n"
         f"• <b>Услуга:</b> {html.escape(service)}\n"
-        f"• <b>Год рождения:</b> {html.escape(birth_year)}\n"
-        f"• <b>Район:</b> {html.escape(address)}\n"
-        f"• <b>Контактный телефон:</b> {html.escape(phone_number)}\n\n"
-        f"📞 Координатор клиники <b>{CLINIC_NAME}</b> свяжется с вами "
-        f"в ближайшее время для подтверждения и подбора удобного времени визита.\n\n"
-        f"<i>При возникновении срочных вопросов звоните нам 24/7:</i> <code>{CLINIC_PHONE}</code>"
+        f"{doc_display}"
+        f"• <b>Пациент:</b> {html.escape(full_name)} ({html.escape(birth_year)} г.р.)\n"
+        f"• <b>Контактный телефон:</b> <code>{html.escape(phone_number)}</code>\n\n"
+        f"📞 Координатор клиники <b>{CLINIC_NAME}</b> свяжется с вами в течение 10–15 минут "
+        f"для подтверждения бронирования кабинета в расписании доктора.\n\n"
+        f"📍 <b>Адрес:</b> {CLINIC_ADDRESS}\n"
+        f"🕒 <b>Режим работы:</b> {CLINIC_SCHEDULE}\n"
+        f"📞 <b>Колл-центр 24/7:</b> <code>{CLINIC_PHONE}</code>"
     )
 
     # Restore the persistent bottom keyboard
